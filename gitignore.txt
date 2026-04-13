@@ -1,0 +1,43 @@
+# Secrets — never commit these
+.env
+.env.prod
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+.venv/
+venv/
+*.egg-info/
+
+# Terraform state — contains sensitive data
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfplan
+
+# Docker
+*.tar
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# macOS
+.DS_Store
+
+# Middleware + core copies (populated by deploy.sh at build time)
+# Uncomment these if you switch back to copying from vs-agentic-platform
+# agent/core/
+# agent/middleware/pii.py
+# agent/middleware/content_filter.py
+# agent/middleware/hitl.py
+# agent/middleware/output_guardrail.py
+
+# Logs
+*.log

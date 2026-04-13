@@ -43,7 +43,7 @@ class SemanticCache:
         )
         return resp.data[0].embedding
 
-    async def lookup(self, query: str, threshold: float = 0.97) -> str | None:
+    async def lookup(self, query: str, threshold: float = 0.97) -> str:
         """
         Search for a cached answer to `query`.
         Returns the cached answer string if similarity >= threshold, else None.
