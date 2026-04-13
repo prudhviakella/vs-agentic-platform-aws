@@ -1,0 +1,35 @@
+# AgentCore SDK
+bedrock-agentcore==1.6.1
+
+# LangGraph + checkpointer
+langgraph==1.0.4
+langgraph-checkpoint-postgres==3.0.5
+
+# LangChain
+langchain==1.1.0
+langchain-core==1.2.22
+langchain-openai==0.3.12
+
+# LLM
+openai==1.68.2
+
+# Vector DB
+pinecone==6.0.0
+
+# Graph DB
+neo4j==5.28.1
+
+# DB checkpointer
+psycopg2-binary==2.9.10
+
+# AWS
+boto3==1.37.28
+
+# Utils
+pydantic==2.11.1
+httpx==0.28.1
+tenacity==9.0.0
+
+# Local packages (from local vs-agentic-platform — install as editable or copy)
+# vs-agent-core and clinical_trial_agent middleware are copied into the container
+# See Dockerfile for COPY commands
