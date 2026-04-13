@@ -88,7 +88,7 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
     Version = "2012-10-17"
     Statement = [
       { Effect = "Allow", Action = ["ssm:GetParameter","secretsmanager:GetSecretValue","kms:Decrypt"], Resource = "*" },
-      { Effect = "Allow", Action = ["bedrock-agentcore-runtime:InvokeAgentRuntime"], Resource = "*" },
+      { Effect = "Allow", Action = ["bedrock-agentcore:InvokeAgentRuntime"], Resource = "*" },
       { Effect = "Allow", Action = ["logs:*"], Resource = "*" }
     ]
   })

@@ -18,6 +18,9 @@ from langgraph.checkpoint.postgres import PostgresSaver
 
 from agent.prompt import build_system_prompt
 from agent.middleware import build_middleware_stack
+from agent.core.cache import SemanticCache
+from agent.core.pinecone_store import PineconeStore
+from agent.core.agent import MiddlewareAgent
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +36,25 @@ def _get_openai_key() -> str:
 
 @lru_cache(maxsize=1)
 def _get_postgres_conn() -> str:
-    sm = boto3.client("secretsmanager", region_name=REGION)
-    return json.loads(sm.get_secret_value(SecretId=f"{SSM_PREFIX}/postgres")["SecretString"])["connection_string"]
+    """
+    Build Postgres connection URL from individual secret fields.
+
+    The secret is stored as:
+        {"username": "postgres", "password": "...", "host": "...", "port": "5432", "dbname": "clinical_agent"}
+
+    NOT as a single "connection_string" field — reading that key causes a
+    KeyError at runtime. We build the URL manually using quote_plus on the
+    password to handle special characters safely.
+    """
+    from urllib.parse import quote_plus
+    sm     = boto3.client("secretsmanager", region_name=REGION)
+    secret = json.loads(
+        sm.get_secret_value(SecretId=f"{SSM_PREFIX}/postgres")["SecretString"]
+    )
+    return (
+        f"postgresql://{secret['username']}:{quote_plus(secret['password'])}"
+        f"@{secret['host']}:{secret.get('port', '5432')}/{secret['dbname']}"
+    )
 
 
 @lru_cache(maxsize=1)
@@ -87,13 +107,18 @@ async def build_agent(tools: list):
 
     # ── Pinecone for cache + episodic memory ──────────────────────────────
     from pinecone import Pinecone
-    from core.cache import SemanticCache
-    from core.pinecone_store import PineconeStore
-
     pc    = Pinecone(api_key=_get_pinecone_key())
     index = pc.Index(_get_pinecone_index_name())
+
+    # Pass the OpenAI async client to cache and store so they can embed queries
+    from openai import AsyncOpenAI
+    oai_async = AsyncOpenAI(api_key=openai_key)
+
     cache = SemanticCache(index=index, domain="pharma")
+    cache.set_openai_client(oai_async)
+
     store = PineconeStore(index=index)
+    store.set_openai_client(oai_async)
 
     # ── Middleware stack (same 9 layers as local) ─────────────────────────
     middleware = build_middleware_stack(
@@ -103,7 +128,6 @@ async def build_agent(tools: list):
     )
 
     # ── Build agent ───────────────────────────────────────────────────────
-    from langchain.agents.middleware import MiddlewareAgent
     agent = MiddlewareAgent.create(
         llm=llm,
         tools=tools,

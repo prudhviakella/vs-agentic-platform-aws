@@ -1,36 +1,98 @@
 """
-mcp_client.py — MCP Gateway Tool Client (AWS_IAM auth)
-========================================================
-Connects to AgentCore MCP Gateway using AWS SigV4 signing.
+mcp_client.py — MCP Gateway Tool Client
+=========================================
 
-Gateway uses --authorizer-type AWS_IAM so the agent signs requests
-using its execution role credentials (available via boto3 on AgentCore).
+WHAT IS STREAMABLE HTTP?
+─────────────────────────
+Traditional HTTP is request-response: client sends, server replies, connection closes.
 
-TOOLS REGISTERED IN GATEWAY:
-  search_tool     → search_lambda    (Pinecone)
-  graph_tool      → graph_lambda     (Neo4j)
-  ask_user_input  → hitl_lambda      (HITL)
-  summariser_tool → summariser_lambda (GPT-4o-mini)
+Streamable HTTP is different — the server can stream data back in chunks over
+a single long-lived HTTP connection. Think of it like a tap left open:
 
-HOW CALLING WORKS:
-  Agent (on AgentCore) has IAM execution role
-  → Role has permission: bedrock-agentcore:InvokeGateway
-  → Calls Gateway URL with SigV4 signed request
-  → Gateway routes to correct Lambda
-  → Lambda returns result
+    Client  ──── POST /mcp ────►  Gateway
+    Client  ◄─── chunk 1 ────────  (tool result part 1)
+    Client  ◄─── chunk 2 ────────  (tool result part 2)
+    Client  ◄─── done ───────────  (connection closes)
+
+MCP (Model Context Protocol) uses Streamable HTTP as its transport layer
+for version 2025-03-26 onwards. This is why we use transport="streamable_http"
+when connecting to the AgentCore MCP Gateway.
+
+If you ever see a 404 or "method not allowed" error, change transport to "sse"
+(Server-Sent Events — the older MCP transport used before 2025-03-26).
+
+
+WHAT IS AWS SIGV4?
+───────────────────
+Every AWS API call must prove the caller's identity. AWS uses a signing standard
+called Signature Version 4 (SigV4) for this.
+
+How it works:
+
+    Step 1 — Take the request (URL + headers + body)
+    Step 2 — Hash the body with SHA-256
+    Step 3 — Build a canonical string from method + URL + headers + hash
+    Step 4 — Sign that string using your AWS secret key
+    Step 5 — Add the signature as an Authorization header
+
+    Client ──── POST /mcp ────────────────────────────────────► Gateway
+                 Authorization: AWS4-HMAC-SHA256
+                   Credential=AKIAIOSFODNN7/20260413/us-east-1/
+                              bedrock-agentcore/aws4_request,
+                   SignedHeaders=content-type;host;x-amz-date,
+                   Signature=abc123...
+
+    Gateway verifies the signature using your IAM role → allows or denies.
+
+On AgentCore Runtime, the agent has an IAM execution role. boto3 picks up
+those temporary credentials automatically (same mechanism as Lambda/ECS).
+The AwsSigV4 class below signs every outbound HTTP request with those credentials
+before it hits the MCP Gateway.
+
+The gateway was created with --authorizer-type AWS_IAM, so it REJECTS any
+request that is not correctly signed. Without this class, every tool call
+returns 403 Forbidden.
+
+
+HOW A TOOL CALL FLOWS END TO END:
+───────────────────────────────────
+  LangGraph agent decides to call search_tool("cancer trial phase 3")
+        │
+        ▼
+  AwsSigV4.auth_flow()  ←── signs the HTTP request with execution role creds
+        │
+        ▼
+  POST https://clinical-trial-mcp-xxx.gateway.bedrock-agentcore.us-east-1.amazonaws.com/mcp
+  Authorization: AWS4-HMAC-SHA256 Credential=...Signature=...
+        │
+        ▼
+  AgentCore MCP Gateway  ←── verifies SigV4 signature, routes to Lambda
+        │
+        ▼
+  search_lambda  ←── embeds query, queries Pinecone, returns top 5 chunks
+        │
+        ▼
+  Tool result returned to agent as a ToolMessage
+
+
+NOTE ON SESSION LIFECYCLE:
+───────────────────────────
+Each tool call opens a FRESH MCP session to the gateway (verified from
+langchain-mcp-adapters source). This means:
+  - No persistent connection to manage
+  - AwsSigV4 runs on every call (always fresh, valid signature)
+  - The context manager in get_mcp_tools() is only for tool DISCOVERY
+    (fetching names, descriptions, schemas) — not for tool execution
 """
 
-import json
 import logging
 import os
-from typing import Optional, List
 
 import boto3
-from botocore.auth import SigV4Auth
+import httpx
+from botocore.auth import SigV4Auth as BotoSigV4Auth
 from botocore.awsrequest import AWSRequest
-from botocore.credentials import Credentials
-from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, Field
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 log = logging.getLogger(__name__)
 
@@ -38,157 +100,77 @@ REGION     = os.environ.get("AWS_REGION", "us-east-1")
 SSM_PREFIX = os.environ.get("SSM_PREFIX", "/vs-agentcore/prod")
 
 
-def _get_gateway_url() -> str:
-    ssm = boto3.client("ssm", region_name=REGION)
-    return ssm.get_parameter(Name=f"{SSM_PREFIX}/mcp/gateway_url")["Parameter"]["Value"]
-
-
-# ── SigV4 signed HTTP call to MCP Gateway ────────────────────────────────
-
-def _call_gateway(tool_name: str, tool_input: dict) -> str:
+class AwsSigV4(httpx.Auth):
     """
-    Call MCP Gateway tool with AWS SigV4 signing.
-    The agent's execution role credentials are used automatically by boto3.
+    Custom httpx authentication class that signs every HTTP request with AWS SigV4.
+
+    httpx calls auth_flow() before sending each request.
+    We build an AWSRequest (botocore's signing abstraction), sign it with the
+    agent's execution role credentials, then copy the signed headers back onto
+    the original httpx request.
+
+    boto3 finds credentials automatically from the AgentCore execution role
+    — same mechanism used by Lambda, ECS, and EC2 instance metadata.
+
+    httpx.Auth.async_auth_flow() (used by the async MCP client) calls auth_flow()
+    by default, so no async override is needed here.
     """
-    import urllib.request
 
-    gateway_url = _get_gateway_url()
-    url         = gateway_url.rstrip("/")
+    def auth_flow(self, request: httpx.Request):
+        # Get temporary credentials from the AgentCore execution role
+        creds = boto3.Session().get_credentials().get_frozen_credentials()
 
-    body    = json.dumps({"name": tool_name, "input": tool_input}).encode()
-    session = boto3.Session()
-    creds   = session.get_credentials().get_frozen_credentials()
-
-    # Build the request
-    request = AWSRequest(
-        method="POST",
-        url=url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-    )
-
-    # Sign with SigV4
-    SigV4Auth(creds, "bedrock-agentcore", REGION).add_auth(request)
-
-    # Execute
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers=dict(request.headers),
-        method="POST",
-    )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        result = json.loads(resp.read().decode())
-
-    log.info(f"[MCP] {tool_name} → {str(result)[:100]}")
-    return json.dumps(result)
-
-
-# ── Tool input schemas ────────────────────────────────────────────────────
-
-class SearchInput(BaseModel):
-    query: str = Field(description="Search query for clinical trial evidence")
-    top_k: int = Field(default=5, description="Number of results (default 5, max 10)")
-
-
-class GraphInput(BaseModel):
-    cypher: str = Field(
-        description=(
-            "Read-only Cypher query against the Neo4j clinical trials graph.\n\n"
-            "SCHEMA:\n"
-            "  (Trial)-[:TARGETS]->(Disease)\n"
-            "  (Trial)-[:USES]->(Drug)\n"
-            "  (Trial)-[:SPONSORED_BY]->(Sponsor)\n"
-            "  (Trial)-[:CONDUCTED_IN]->(Country)\n"
-            "  (Trial)-[:MEASURES]->(Outcome {type: 'primary'|'secondary'})\n"
-            "  (Trial)-[:INCLUDES]->(PatientPopulation)\n"
-            "  (Trial)-[:ASSOCIATED_WITH]->(MeSHTerm)\n\n"
-            "PROPERTIES:\n"
-            "  Trial: nctId, briefTitle, phase, overallStatus, enrollmentCount\n"
-            "  Drug: name, type\n"
-            "  PatientPopulation: minimumAge, maximumAge, gender, eligibilityCriteria\n\n"
-            "RULES: Always toLower() for strings. Always LIMIT 10. No writes."
+        # Build a botocore AWSRequest — needed for SigV4 signing
+        aws_req = AWSRequest(
+            method=request.method,
+            url=str(request.url),
+            data=request.content,
+            headers=dict(request.headers),
         )
-    )
 
+        # Sign: adds Authorization, x-amz-date, x-amz-security-token headers
+        # Service name "bedrock-agentcore" must match the gateway's expected service
+        BotoSigV4Auth(creds, "bedrock-agentcore", REGION).add_auth(aws_req)
 
-class HitlInput(BaseModel):
-    user_answer:    str                  = Field(default="", description="Leave empty on initial call. Injected on resume.")
-    question:       Optional[str]        = Field(default=None, description="Clarifying question to ask the user")
-    options:        Optional[List[str]]  = Field(default=None, description="Options derived from search results only")
-    allow_freetext: bool                 = Field(default=True, description="Allow typed custom answer")
+        # Copy signed headers back onto the httpx request
+        for key, value in aws_req.headers.items():
+            request.headers[key] = value
 
+        yield request  # httpx sends the now-signed request
 
-class SummariserInput(BaseModel):
-    chunks: List[str] = Field(description="List of text chunks to synthesise")
-    query:  str       = Field(description="Original query to focus the synthesis")
-
-
-# ── Tool functions ────────────────────────────────────────────────────────
-
-def _search(query: str, top_k: int = 5) -> str:
-    return _call_gateway("search_tool", {"query": query, "top_k": top_k})
-
-def _graph(cypher: str) -> str:
-    return _call_gateway("graph_tool", {"cypher": cypher})
-
-def _hitl(user_answer: str = "", question: str = None,
-          options: list = None, allow_freetext: bool = True) -> str:
-    return _call_gateway("ask_user_input", {
-        "user_answer": user_answer, "question": question,
-        "options": options or [], "allow_freetext": allow_freetext,
-    })
-
-def _summarise(chunks: list, query: str = "") -> str:
-    return _call_gateway("summariser_tool", {"chunks": chunks, "query": query})
-
-
-# ── Public API ────────────────────────────────────────────────────────────
 
 async def get_mcp_tools() -> list:
-    """Build LangChain tools backed by MCP Gateway Lambda functions."""
-    gateway_url = _get_gateway_url()
-    log.info(f"[MCP] Gateway URL: {gateway_url}")
+    """
+    Connect to the AgentCore MCP Gateway and return all registered tools.
 
-    return [
-        StructuredTool.from_function(
-            func=_search,
-            name="search_tool",
-            description=(
-                "Semantic search over the clinical trials knowledge base (Pinecone). "
-                "Use this FIRST for any query about trial results, efficacy, safety, or evidence."
-            ),
-            args_schema=SearchInput,
-        ),
-        StructuredTool.from_function(
-            func=_graph,
-            name="graph_tool",
-            description=(
-                "Execute a read-only Cypher query against the Neo4j clinical trials graph. "
-                "Use for: drug-disease relationships, contraindications, sponsors, "
-                "patient eligibility, trial locations. "
-                "For patient-specific safety questions, call BOTH search_tool AND graph_tool."
-            ),
-            args_schema=GraphInput,
-        ),
-        StructuredTool.from_function(
-            func=_hitl,
-            name="ask_user_input",
-            description=(
-                "Ask the user a clarifying question when their request is ambiguous. "
-                "MANDATORY: Always call search_tool FIRST. "
-                "Generate options ONLY from search results — never from training knowledge. "
-                "Call this at most ONCE per conversation."
-            ),
-            args_schema=HitlInput,
-        ),
-        StructuredTool.from_function(
-            func=_summarise,
-            name="summariser_tool",
-            description=(
-                "Synthesise multiple retrieved text chunks into a concise summary. "
-                "Use when search_tool returns 3+ chunks on the same topic."
-            ),
-            args_schema=SummariserInput,
-        ),
-    ]
+    MultiServerMCPClient handles the MCP protocol:
+      1. Opens a Streamable HTTP connection to the gateway
+      2. Calls tools/list — gateway returns names, descriptions, input schemas
+         for all 4 registered targets (search, graph, hitl, summariser)
+      3. Converts each MCP tool definition into a LangChain StructuredTool
+      4. Closes the discovery session
+
+    Each SUBSEQUENT tool call (when the agent runs) opens its own fresh
+    MCP session — this context manager is only for the initial tool discovery.
+    """
+    ssm         = boto3.client("ssm", region_name=REGION)
+    gateway_url = ssm.get_parameter(
+        Name=f"{SSM_PREFIX}/mcp/gateway_url"
+    )["Parameter"]["Value"]
+
+    log.info(f"[MCP] Connecting to gateway: {gateway_url}")
+
+    async with MultiServerMCPClient({
+        "clinical-trial-tools": {
+            # Streamable HTTP = MCP over long-lived HTTP (version 2025-03-26)
+            # If this fails with 404, change to "sse" (older transport)
+            "transport": "streamable_http",
+            "url":       gateway_url,
+            # AwsSigV4 signs every HTTP request before it leaves the container
+            "auth":      AwsSigV4(),
+        }
+    }) as client:
+        tools = await client.get_tools()
+
+    log.info(f"[MCP] Tools discovered: {[t.name for t in tools]}")
+    return tools
