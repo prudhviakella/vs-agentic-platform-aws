@@ -1,17 +1,25 @@
 # AgentCore SDK
 bedrock-agentcore==1.6.1
 
-# LangGraph + checkpointer
+# LangChain ecosystem — pinned as a compatible set (matches local pyproject.toml exactly)
+langsmith==0.6.9
+langchain-core==1.2.22
+langchain==1.1.0
+langchain-openai==1.1.1
+langchain-community==0.4.1
+langchain-tavily
+
+# LangGraph
 langgraph==1.0.4
+langgraph-prebuilt==1.0.7
+langgraph-checkpoint==3.0.1
 langgraph-checkpoint-postgres==3.0.5
 
-# LangChain
-langchain==1.1.0
-langchain-core==1.2.22
-langchain-openai==0.3.12
+# MCP adapters
+langchain-mcp-adapters>=0.1.0
 
-# LLM
-openai==1.68.2
+# OpenAI — unpinned, resolved by langchain-openai>=1.109.1
+openai
 
 # Vector DB
 pinecone==6.0.0
@@ -19,20 +27,17 @@ pinecone==6.0.0
 # Graph DB
 neo4j==5.28.1
 
-# DB checkpointer — psycopg v3 (NOT psycopg2)
-# langgraph-checkpoint-postgres 3.x requires psycopg v3
-# psycopg2 will cause PostgresSaver.from_conn_string to fail silently
-psycopg[binary]>=3.1.9
+# Postgres — exact versions from local vs-agent-core pyproject.toml
+psycopg==3.3.3
+psycopg-binary==3.3.3
+psycopg-pool
 
-# AWS
-boto3==1.37.28
+# AWS — unpinned, resolved by bedrock-agentcore
+boto3
 
 # Utils
 pydantic==2.11.1
 httpx==0.28.1
-langchain-mcp-adapters>=0.1.0
 tenacity==9.0.0
-
-# Local packages (from local vs-agentic-platform — install as editable or copy)
-# vs-agent-core and clinical_trial_agent middleware are copied into the container
-# See Dockerfile for COPY commands
+numpy
+watchtower>=3.0.0

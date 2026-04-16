@@ -46,11 +46,16 @@ resource "aws_subnet" "private" {
   tags = { Name = "${local.prefix}-private-${count.index}" }
 }
 
-resource "aws_internet_gateway" "main" { vpc_id = aws_vpc.main.id }
+resource "aws_internet_gateway" "main" {
+  vpc_id = aws_vpc.main.id
+}
 
 resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
-  route { cidr_block = "0.0.0.0/0"; gateway_id = aws_internet_gateway.main.id }
+  route {
+    cidr_block = "0.0.0.0/0"
+    gateway_id = aws_internet_gateway.main.id
+  }
 }
 
 resource "aws_route_table_association" "public" {
@@ -63,7 +68,10 @@ resource "aws_route_table_association" "public" {
 
 resource "aws_ecs_cluster" "main" {
   name = "${local.prefix}-cluster"
-  setting { name = "containerInsights"; value = "enabled" }
+  setting {
+    name  = "containerInsights"
+    value = "enabled"
+  }
 }
 
 # ── IAM ───────────────────────────────────────────────────────────────────
@@ -72,7 +80,11 @@ resource "aws_iam_role" "ecs_task" {
   name = "${local.prefix}-ecs-task"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{ Effect = "Allow", Principal = { Service = "ecs-tasks.amazonaws.com" }, Action = "sts:AssumeRole" }]
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
   })
 }
 
@@ -87,9 +99,26 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      { Effect = "Allow", Action = ["ssm:GetParameter","secretsmanager:GetSecretValue","kms:Decrypt"], Resource = "*" },
-      { Effect = "Allow", Action = ["bedrock-agentcore:InvokeAgentRuntime"], Resource = "*" },
-      { Effect = "Allow", Action = ["logs:*"], Resource = "*" }
+      {
+        Effect   = "Allow"
+        Action   = ["ssm:GetParameter", "ssm:GetParameters", "secretsmanager:GetSecretValue", "kms:Decrypt"]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["bedrock-agentcore:InvokeAgentRuntime"]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["dynamodb:Scan", "dynamodb:GetItem", "dynamodb:PutItem"]
+        Resource = "*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["logs:*"]
+        Resource = "*"
+      }
     ]
   })
 }
@@ -99,16 +128,46 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
 resource "aws_security_group" "alb" {
   name   = "${local.prefix}-alb-sg"
   vpc_id = aws_vpc.main.id
-  ingress { from_port = 80;  to_port = 80;  protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"] }
-  ingress { from_port = 443; to_port = 443; protocol = "tcp"; cidr_blocks = ["0.0.0.0/0"] }
-  egress  { from_port = 0;  to_port = 0;   protocol = "-1";  cidr_blocks = ["0.0.0.0/0"] }
+
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 resource "aws_security_group" "ecs" {
   name   = "${local.prefix}-ecs-sg"
   vpc_id = aws_vpc.main.id
-  ingress { from_port = 0; to_port = 65535; protocol = "tcp"; security_groups = [aws_security_group.alb.id] }
-  egress  { from_port = 0; to_port = 0;     protocol = "-1";  cidr_blocks = ["0.0.0.0/0"] }
+
+  ingress {
+    from_port       = 0
+    to_port         = 65535
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
 }
 
 # ── ALB ───────────────────────────────────────────────────────────────────
@@ -118,56 +177,127 @@ resource "aws_lb" "main" {
   load_balancer_type = "application"
   subnets            = aws_subnet.public[*].id
   security_groups    = [aws_security_group.alb.id]
-  idle_timeout       = 300   # SSE streams need longer timeout
+  idle_timeout       = 300
 }
 
 resource "aws_lb_target_group" "platform" {
   name        = "${local.prefix}-platform"
-  port        = 8000; protocol = "HTTP"; vpc_id = aws_vpc.main.id; target_type = "ip"
-  health_check { path = "/health"; timeout = 10; interval = 30; healthy_threshold = 2; unhealthy_threshold = 3 }
+  port        = 8000
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/health"
+    timeout             = 10
+    interval            = 30
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+  }
 }
 
 resource "aws_lb_target_group" "ui" {
   name        = "${local.prefix}-ui"
-  port        = 8501; protocol = "HTTP"; vpc_id = aws_vpc.main.id; target_type = "ip"
-  health_check { path = "/health"; timeout = 10; interval = 30 }
+  port        = 8501
+  protocol    = "HTTP"
+  vpc_id      = aws_vpc.main.id
+  target_type = "ip"
+
+  health_check {
+    path     = "/healthz"
+    timeout  = 10
+    interval = 30
+  }
 }
 
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.main.arn
-  port = 80; protocol = "HTTP"
-  default_action { type = "forward"; target_group_arn = aws_lb_target_group.ui.arn }
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.ui.arn
+  }
 }
 
 resource "aws_lb_listener_rule" "platform_api" {
-  listener_arn = aws_lb_listener.http.arn; priority = 10
-  action { type = "forward"; target_group_arn = aws_lb_target_group.platform.arn }
-  condition { path_pattern { values = ["/api/*"] } }
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.platform.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*"]
+    }
+  }
 }
 
-# ── RDS Postgres (LangGraph checkpointer) ────────────────────────────────
-
-resource "aws_db_subnet_group" "main" {
-  name       = "${local.prefix}-db-subnet"
-  subnet_ids = aws_subnet.private[*].id
-}
+# ── RDS Postgres ──────────────────────────────────────────────────────────
 
 resource "aws_security_group" "rds" {
   name   = "${local.prefix}-rds-sg"
   vpc_id = aws_vpc.main.id
-  ingress { from_port = 5432; to_port = 5432; protocol = "tcp"; security_groups = [aws_security_group.ecs.id] }
+
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ecs.id]
+  }
+
+  ingress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_db_subnet_group" "main" {
+  name       = "${local.prefix}-db-subnet"
+  subnet_ids = aws_subnet.public[*].id
 }
 
 resource "aws_db_instance" "postgres" {
   identifier             = "${local.prefix}-postgres"
-  engine                 = "postgres"; engine_version = "15.4"
-  instance_class         = "db.t3.micro"; allocated_storage = 20
-  db_name                = "clinical_agent"; username = "postgres"
+  engine                 = "postgres"
+  engine_version         = "15"
+  instance_class         = "db.t3.micro"   # FREE TIER: 750 hrs/month
+  allocated_storage      = 20              # FREE TIER: 20 GB
+  storage_type           = "gp2"
+  db_name                = "clinical_agent"
+  username               = "postgres"
   password               = var.postgres_password
   db_subnet_group_name   = aws_db_subnet_group.main.name
   vpc_security_group_ids = [aws_security_group.rds.id]
-  skip_final_snapshot    = true; publicly_accessible = false
+  skip_final_snapshot    = true
+  publicly_accessible    = true
   tags = { Name = "${local.prefix}-postgres" }
+}
+
+# ── DynamoDB traces ───────────────────────────────────────────────────────
+
+resource "aws_dynamodb_table" "traces" {
+  name         = "${local.prefix}-traces"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "run_id"
+
+  attribute {
+    name = "run_id"
+    type = "S"
+  }
+
+  ttl {
+    attribute_name = "expires_at"
+    enabled        = true
+  }
+
+  tags = { Name = "${local.prefix}-traces" }
 }
 
 # ── ECS: Platform ─────────────────────────────────────────────────────────
@@ -181,7 +311,8 @@ resource "aws_ecs_task_definition" "platform" {
   family                   = "${local.prefix}-platform"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "512"; memory = "1024"
+  cpu                      = "256"
+  memory                   = "512"
   execution_role_arn       = aws_iam_role.ecs_task.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
@@ -190,21 +321,38 @@ resource "aws_ecs_task_definition" "platform" {
     image = var.platform_image_uri
     portMappings = [{ containerPort = 8000 }]
     environment = [
-      { name = "AWS_REGION",  value = var.aws_region },
-      { name = "SSM_PREFIX",  value = var.ssm_prefix },
+      { name = "AWS_REGION", value = var.aws_region },
+      { name = "SSM_PREFIX", value = var.ssm_prefix }
     ]
     logConfiguration = {
       logDriver = "awslogs"
-      options   = { "awslogs-group" = aws_cloudwatch_log_group.platform.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "platform" }
+      options = {
+        "awslogs-group"         = "/ecs/${local.prefix}/platform"
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "platform"
+      }
     }
   }])
 }
 
 resource "aws_ecs_service" "platform" {
-  name = "${local.prefix}-platform"; cluster = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.platform.arn; desired_count = 1; launch_type = "FARGATE"
-  network_configuration { subnets = aws_subnet.public[*].id; security_groups = [aws_security_group.ecs.id]; assign_public_ip = true }
-  load_balancer { target_group_arn = aws_lb_target_group.platform.arn; container_name = "platform"; container_port = 8000 }
+  name            = "${local.prefix}-platform"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.platform.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = aws_subnet.public[*].id
+    security_groups  = [aws_security_group.ecs.id]
+    assign_public_ip = true
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.platform.arn
+    container_name   = "platform"
+    container_port   = 8000
+  }
 }
 
 # ── ECS: UI ───────────────────────────────────────────────────────────────
@@ -218,7 +366,8 @@ resource "aws_ecs_task_definition" "ui" {
   family                   = "${local.prefix}-ui"
   network_mode             = "awsvpc"
   requires_compatibilities = ["FARGATE"]
-  cpu                      = "256"; memory = "512"
+  cpu                      = "256"
+  memory                   = "512"
   execution_role_arn       = aws_iam_role.ecs_task.arn
   task_role_arn            = aws_iam_role.ecs_task.arn
 
@@ -228,24 +377,45 @@ resource "aws_ecs_task_definition" "ui" {
     portMappings = [{ containerPort = 8501 }]
     environment = [
       { name = "AGENT_API_URL", value = "http://${aws_lb.main.dns_name}" },
-      { name = "AGENT_DOMAIN",  value = "pharma" },
+      { name = "AGENT_DOMAIN",  value = "pharma" }
     ]
-    secrets = [{ name = "AGENT_API_KEY", valueFrom = "${var.ssm_prefix}/platform_api_key" }]
+    secrets = [{
+      name      = "AGENT_API_KEY"
+      valueFrom = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/clinical-agent/prod/platform/api_key"
+    }]
     logConfiguration = {
       logDriver = "awslogs"
-      options   = { "awslogs-group" = aws_cloudwatch_log_group.ui.name, "awslogs-region" = var.aws_region, "awslogs-stream-prefix" = "ui" }
+      options = {
+        "awslogs-group"         = "/ecs/${local.prefix}/ui"
+        "awslogs-region"        = var.aws_region
+        "awslogs-stream-prefix" = "ui"
+      }
     }
   }])
 }
 
 resource "aws_ecs_service" "ui" {
-  name = "${local.prefix}-ui"; cluster = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.ui.arn; desired_count = 1; launch_type = "FARGATE"
-  network_configuration { subnets = aws_subnet.public[*].id; security_groups = [aws_security_group.ecs.id]; assign_public_ip = true }
-  load_balancer { target_group_arn = aws_lb_target_group.ui.arn; container_name = "ui"; container_port = 8501 }
+  name            = "${local.prefix}-ui"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.ui.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = aws_subnet.public[*].id
+    security_groups  = [aws_security_group.ecs.id]
+    assign_public_ip = true
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.ui.arn
+    container_name   = "ui"
+    container_port   = 8501
+  }
 }
 
 # ── Outputs ───────────────────────────────────────────────────────────────
 
-output "alb_dns" { value = aws_lb.main.dns_name }
-output "rds_endpoint" { value = aws_db_instance.postgres.endpoint }
+output "alb_dns"        { value = aws_lb.main.dns_name }
+output "rds_endpoint"   { value = aws_db_instance.postgres.endpoint }
+output "dynamodb_table" { value = aws_dynamodb_table.traces.name }

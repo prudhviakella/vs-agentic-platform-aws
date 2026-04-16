@@ -64,8 +64,8 @@ vs-agentcore-platform-aws/
 
 ```bash
 # 1. Fill in secrets
-cp .env.prod.example .env.prod
-source .env.prod
+cp ..env.prod.example ..env.prod
+source ..env.prod
 
 # 2. Create Terraform state bucket (once)
 aws s3 mb s3://vs-agentcore-tfstate --region us-east-1

@@ -1,81 +1,107 @@
 """
 pii.py — DomainPIIMiddleware
-=============================
-Scrubs Personally Identifiable Information from user queries BEFORE
-the LLM sees them. This ensures no real patient data is sent to OpenAI.
+==============================
+One middleware instance covering ALL domain PII rules — input AND output.
 
-Patterns scrubbed:
-  - Patient names (heuristic: Dr. / Mr. / Mrs. + capitalised words)
-  - NHS / medical record numbers
-  - Dates of birth
-  - Email addresses
-  - Phone numbers
-  - UK / US postcodes
+WHY one class not three PIIMiddleware instances:
+  LangChain 1.0 asserts all middleware names must be unique:
+    assert len({m.name for m in middleware}) == len(middleware)
+  Three PIIMiddleware() calls all share the same .name → AssertionError.
+  Solution: one custom class, one name, handles all PII rules internally.
 
-After scrubbing, state["pii_scrubbed"] = True if anything was replaced.
-The original query is NOT stored — scrubbing is in-place and irreversible.
+WHY here (domain middleware, not gateway):
+  PII definition is domain-specific:
+    Pharma:    patient email, credit card numbers
+    Finance:   account numbers, SSN, routing numbers
+    Marketing: phone numbers, postal codes
+  Gateway is generic — it cannot know what counts as PII per domain.
+
+Rules applied (pharma domain):
+  INPUT  — email       → [REDACTED_EMAIL]
+  INPUT  — credit card → ****-****-****-1234
+  OUTPUT — email       → [REDACTED_EMAIL]
 """
 
 import logging
 import re
+from typing import Any
 
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from agent.middleware.base import BaseAgentMiddleware
+from langchain.agents.middleware import AgentState, hook_config
+from core.middleware.base import BaseAgentMiddleware
+from langchain_core.messages import AIMessage
+from langgraph.runtime import Runtime
 
 log = logging.getLogger(__name__)
 
-# Patterns to scrub — ordered from most specific to least specific
-_PATTERNS = [
-    # Email
-    (r'\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Z|a-z]{2,}\b', "[EMAIL]"),
-    # Phone (UK/US)
-    (r'\b(\+44|0044|0)[\s\-]?(\d[\s\-]?){9,10}\b', "[PHONE]"),
-    (r'\b(\+1[\s\-]?)?\(?\d{3}\)?[\s\-]\d{3}[\s\-]\d{4}\b', "[PHONE]"),
-    # Date of birth
-    (r'\b(0?[1-9]|[12]\d|3[01])[/\-](0?[1-9]|1[0-2])[/\-](\d{2}|\d{4})\b', "[DOB]"),
-    # NHS number (10 digits with optional spaces)
-    (r'\b\d{3}[\s\-]\d{3}[\s\-]\d{4}\b', "[NHS_NUMBER]"),
-    # Medical record numbers (MRN: 6-10 digits)
-    (r'\bMRN[\s:#]?\d{6,10}\b', "[MRN]"),
-    # UK postcode
-    (r'\b[A-Z]{1,2}\d[A-Z\d]?\s?\d[A-Z]{2}\b', "[POSTCODE]"),
-    # US zipcode
-    (r'\b\d{5}(-\d{4})?\b', "[ZIPCODE]"),
-    # Patient names with title prefix
-    (r'\b(Dr|Mr|Mrs|Ms|Miss|Prof)\.?\s+[A-Z][a-z]+(\s+[A-Z][a-z]+)?\b', "[PATIENT_NAME]"),
-]
-
-
-def _scrub(text: str) -> tuple[str, bool]:
-    """Apply all PII patterns and return (scrubbed_text, was_modified)."""
-    original = text
-    for pattern, replacement in _PATTERNS:
-        text = re.sub(pattern, replacement, text)
-    return text, text != original
-
 
 class DomainPIIMiddleware(BaseAgentMiddleware):
-    """
-    Scrubs PII from the last HumanMessage in the conversation.
-    Only the most recent user message is scrubbed — older messages
-    have already been through the pipeline.
-    """
 
-    async def before_agent(self, state: dict) -> None:
+    _EMAIL_PAT = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", re.IGNORECASE)
+    _CC_PAT    = re.compile(r"\b(?:\d[ \-]?){15,16}\b")
+
+    @staticmethod
+    def _redact_email(text: str) -> str:
+        return DomainPIIMiddleware._EMAIL_PAT.sub("[REDACTED_EMAIL]", text)
+
+    @staticmethod
+    def _mask_cc(text: str) -> str:
+        def _mask(m):
+            digits = re.sub(r"\D", "", m.group())
+            return "****-****-****-" + digits[-4:]
+        return DomainPIIMiddleware._CC_PAT.sub(_mask, text)
+
+    @staticmethod
+    def _clean_input(text: str) -> str:
+        text = DomainPIIMiddleware._redact_email(text)
+        text = DomainPIIMiddleware._mask_cc(text)
+        return text
+
+    @hook_config(can_jump_to=[])
+    def before_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        """Redact PII from the latest user message before LLM sees it."""
         messages = state.get("messages", [])
         if not messages:
-            return
+            return None
 
-        # Find the last HumanMessage and scrub it
-        for i in range(len(messages) - 1, -1, -1):
-            msg = messages[i]
-            if isinstance(msg, HumanMessage):
-                scrubbed, modified = _scrub(str(msg.content))
-                if modified:
-                    messages[i] = HumanMessage(content=scrubbed)
-                    state["pii_scrubbed"] = True
-                    log.info("[PII] Scrubbed PII from user message")
-                break
+        last_msg = messages[-1]
+        if not (hasattr(last_msg, "type") and last_msg.type == "human"):
+            return None
 
-        state["messages"] = messages
+        original = str(last_msg.content)
+        cleaned = self._clean_input(original)
+
+        if cleaned == original:
+            return None  # nothing changed — no state update needed
+
+        log.info(f"[DOMAIN_PII] Input redacted  '{original[:40]}' → '{cleaned[:40]}'")
+        # Create a new message object — don't mutate in place
+        #redacted_msg = last_msg.copy(update={"content": cleaned})  # Pydantic v1
+        redacted_msg = last_msg.model_copy(update={"content": cleaned})  # Pydantic v2
+
+        # Return updated state — replace last message, keep the rest intact
+        return {"messages": messages[:-1] + [redacted_msg]}
+
+    @hook_config(can_jump_to=[])
+    def after_agent(self, state: AgentState, runtime: Runtime) -> dict[str, Any] | None:
+        """Redact email from the final AI response before it reaches the user."""
+        messages = state.get("messages", [])
+        if not messages:
+            return None
+
+        last_msg = messages[-1]
+        if not isinstance(last_msg, AIMessage):
+            return None
+
+        original = str(last_msg.content)
+        cleaned = self._redact_email(original)
+
+        if cleaned == original:
+            return None  # nothing changed — no state update needed
+
+        log.info(f"[DOMAIN_PII] Output redacted  '{original[:40]}' → '{cleaned[:40]}'")
+
+        # New message object — don't mutate in place (Pydantic v2)
+        redacted_msg = last_msg.model_copy(update={"content": cleaned})
+
+        # Return updated state
+        return {"messages": messages[:-1] + [redacted_msg]}
