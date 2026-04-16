@@ -165,11 +165,8 @@ else:
             "templateType":      "TEXT",
             "templateConfiguration": {
                 "text": {
-                    "text":               prompt_text,
-                    "inputVariables": [
-                        {"name": "domain_frame"},
-                        {"name": "max_tool_calls"},
-                    ]
+                    "text":           prompt_text,
+                    "inputVariables": []
                 }
             },
             "inferenceConfiguration": {
