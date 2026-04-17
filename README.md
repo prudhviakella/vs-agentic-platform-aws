@@ -1,6 +1,5 @@
 # VS AgentCore Platform — Clinical Trial Research Agent
 
-> **Vidya Sankalp · Applied GenAI Engineering**
 > A production multi-agent AI platform built on AWS Bedrock AgentCore for clinical trial research.
 
 ---
@@ -23,9 +22,33 @@
 
 ---
 
-## Overview
+## UI Preview
 
-This platform lets researchers, clinicians, and pharma professionals search 5,772 clinical trial documents and a live biomedical knowledge graph using natural language. The agent autonomously selects tools, asks clarifying questions when needed (HITL), synthesises evidence across multiple sources, and cites every claim.
+The platform ships with a dark clinical web UI built on FastAPI + vanilla HTML.
+
+**Welcome screen — starter question chips, session ID, domain pill:**
+
+![Welcome Screen](docs/ss_welcome.png)
+
+**Tool steps — search → graph query → synthesise (each shows spinner → ✓) + cited answer:**
+
+![Answer with Tool Steps](docs/ss_answer.png)
+
+**HITL — agent searches first, then presents real trial names as clickable options:**
+
+![HITL Card](docs/ss_hitl_1.png)
+
+**HITL continued — user selects option, agent resumes and delivers full answer:**
+
+![HITL Answer](docs/ss_hitl_2.png)
+
+**Safety query — multi-tool reasoning with NCT IDs cited in every claim:**
+
+![Safety Query](docs/ss_safety.png)
+
+---
+
+## Overview
 
 **Key capabilities:**
 - Semantic search over clinical trial chunks (Pinecone)
@@ -1220,7 +1243,3 @@ Destroys all Terraform-managed resources: ECS cluster, ALB, RDS, DynamoDB table,
 - MCP Gateway → AWS Console → Bedrock → AgentCore → Gateways
 - ECR repositories → AWS Console → ECR
 - IAM roles → AWS Console → IAM
-
----
-
-*Built for Vidya Sankalp Applied GenAI Engineering Program — Module 7: Agentic Systems on AWS*

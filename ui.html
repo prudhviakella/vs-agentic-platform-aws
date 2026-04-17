@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Clinical Trial Research Agent</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --font:'AppleGothic','Apple Gothic','Gill Sans MT','Gill Sans','Century Gothic','Trebuchet MS',ui-rounded,sans-serif;
+  --bg:#07111e;--surface:#0d1928;--surface-2:#112030;
+  --border:#1a2e44;--border-2:#1f3550;
+  --accent:#00c2ff;--accent-dim:rgba(0,194,255,0.10);--accent-glow:rgba(0,194,255,0.05);
+  --green:#00e5a0;--red:#ff4d6a;--amber:#ffb340;
+  --text:#cddff0;--text-2:#6b8fae;--text-3:#2e4a63;
+  --r:8px;--r-lg:14px;
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);-webkit-font-smoothing:antialiased}
+.shell{display:grid;grid-template-rows:58px 1fr auto;height:100vh;max-width:860px;margin:0 auto}
+
+/* header */
+header{display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid var(--border);background:var(--surface)}
+.brand{display:flex;align-items:center;gap:11px}
+.brand-icon{width:30px;height:30px;background:linear-gradient(135deg,#00c2ff,#005fff);border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:15px}
+.brand-name{font-size:15px;font-weight:500;letter-spacing:.01em}
+.header-right{display:flex;gap:10px;align-items:center}
+.pill{font-size:11px;font-family:var(--font);color:var(--text-2);background:var(--surface-2);border:1px solid var(--border);padding:3px 10px;border-radius:20px;letter-spacing:.02em}
+.pill.live{color:var(--green);border-color:rgba(0,229,160,.25);background:rgba(0,229,160,.06)}
+
+/* messages */
+.messages{overflow-y:auto;padding:28px 28px 8px;display:flex;flex-direction:column;gap:20px;scroll-behavior:smooth}
+.messages::-webkit-scrollbar{width:3px}
+.messages::-webkit-scrollbar-thumb{background:var(--border-2);border-radius:2px}
+
+/* welcome */
+.welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px;padding:52px 20px;text-align:center}
+.welcome-eyebrow{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);font-weight:500}
+.welcome-title{font-size:36px;font-weight:500;line-height:1.15;letter-spacing:-.01em}
+.welcome-title span{color:var(--accent);font-style:italic}
+.welcome-sub{font-size:14px;color:var(--text-2);max-width:420px;line-height:1.7;font-weight:300}
+.starters-label{font-size:11px;color:var(--text-3);letter-spacing:.06em;text-transform:uppercase}
+.starters{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:620px}
+.starter{background:var(--surface);border:1px solid var(--border);color:var(--text-2);font-family:var(--font);font-size:13px;font-weight:300;padding:9px 16px;border-radius:22px;cursor:pointer;transition:all .16s;line-height:1.4}
+.starter:hover{border-color:var(--accent);color:var(--text);background:var(--accent-glow);transform:translateY(-1px)}
+
+/* messages */
+.msg{display:flex;gap:12px;animation:fadeUp .18s ease}
+.msg.user{flex-direction:row-reverse}
+.av{width:30px;height:30px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:500}
+.av.agent{background:rgba(0,194,255,.12);border:1px solid rgba(0,194,255,.25);color:var(--accent)}
+.av.user{background:var(--surface-2);border:1px solid var(--border);color:var(--text-2)}
+.bubble{max-width:78%;padding:13px 18px;border-radius:var(--r-lg);font-size:14px;line-height:1.75;font-weight:300}
+.msg.user .bubble{background:var(--surface-2);border:1px solid var(--border);color:var(--text);border-radius:var(--r-lg) 4px var(--r-lg) var(--r-lg)}
+.msg.agent .bubble{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:4px var(--r-lg) var(--r-lg) var(--r-lg)}
+
+/* markdown */
+.bubble h1,.bubble h2,.bubble h3{font-weight:500;margin:16px 0 8px;letter-spacing:-.01em}
+.bubble h1{font-size:18px}.bubble h2{font-size:16px}.bubble h3{font-size:14px}
+.bubble p{margin:8px 0}.bubble ul,.bubble ol{padding-left:20px;margin:8px 0}.bubble li{margin:5px 0}
+.bubble strong{font-weight:500}.bubble em{color:var(--text-2)}
+.bubble code{font-family:'Menlo','Courier New',monospace;font-size:12px;background:var(--surface-2);border:1px solid var(--border);padding:1px 6px;border-radius:4px;color:var(--accent)}
+.bubble pre{background:var(--bg);border:1px solid var(--border);border-radius:var(--r);padding:12px;overflow-x:auto;margin:10px 0}
+.bubble pre code{background:none;border:none;padding:0;font-size:12px}
+.bubble blockquote{border-left:3px solid var(--accent);padding-left:14px;margin:8px 0;color:var(--text-2)}
+.bubble a{color:var(--accent);text-decoration:none}
+.bubble hr{border:none;border-top:1px solid var(--border);margin:14px 0}
+.bubble table{border-collapse:collapse;width:100%;margin:10px 0;font-size:13px}
+.bubble th,.bubble td{border:1px solid var(--border);padding:7px 12px;text-align:left}
+.bubble th{background:var(--surface-2);font-weight:500}
+.meta-footer{font-size:11px;color:var(--text-3);margin-top:12px;padding-top:10px;border-top:1px solid var(--border);display:flex;gap:14px;font-weight:300;letter-spacing:.01em}
+
+/* tool step */
+.tool-step{display:flex;align-items:center;gap:10px;padding:9px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);font-size:12.5px;font-weight:300;color:var(--text-2);max-width:320px;margin-left:42px;animation:fadeUp .18s ease;letter-spacing:.01em}
+.tool-step.done{color:var(--green);border-color:rgba(0,229,160,.2)}
+.tool-step.thinking{border-style:dashed;border-color:var(--border-2)}
+.spin{width:13px;height:13px;border:1.5px solid var(--border-2);border-top-color:var(--accent);border-radius:50%;animation:spin .65s linear infinite;flex-shrink:0}
+.spin.pulse{border-color:transparent;border-top-color:var(--text-3);animation:spin 1.2s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.cur{display:inline-block;width:2px;height:13px;background:var(--accent);margin-left:1px;vertical-align:middle;animation:blink .9s step-end infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+/* hitl */
+.hitl{background:var(--surface);border:1px solid var(--border);border-top:2px solid var(--accent);border-radius:var(--r-lg);padding:20px;max-width:500px;margin-left:42px;animation:fadeUp .18s ease}
+.hitl-tag{font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;display:flex;align-items:center;gap:6px;font-weight:500}
+.hitl-tag::before{content:'';width:5px;height:5px;background:var(--accent);border-radius:50%}
+.hitl-q{font-size:14px;font-weight:400;color:var(--text);margin-bottom:16px;line-height:1.55}
+.hitl-opts{display:flex;flex-direction:column;gap:7px;margin-bottom:12px}
+.hitl-opt{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;font-size:13px;font-weight:300;color:var(--text-2);transition:all .14s;text-align:left;width:100%;font-family:var(--font)}
+.hitl-opt:hover{border-color:var(--accent);color:var(--text);background:var(--accent-dim);transform:translateX(2px)}
+.hitl-opt:hover .num{background:var(--accent);color:var(--bg)}
+.hitl-opt.picked{border-color:var(--green);color:var(--green);background:rgba(0,229,160,.07);pointer-events:none}
+.num{font-size:11px;width:20px;height:20px;background:var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .14s;font-family:'Menlo',monospace}
+.hitl-hint{font-size:12px;color:var(--text-3);font-style:italic;font-weight:300}
+
+/* input */
+.bar{padding:16px 28px;border-top:1px solid var(--border);background:var(--surface);display:flex;gap:10px;align-items:flex-end}
+.inp-wrap{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:var(--r-lg);display:flex;align-items:flex-end;padding:11px 16px;transition:border-color .14s}
+.inp-wrap:focus-within{border-color:var(--accent)}
+textarea{flex:1;background:none;border:none;outline:none;color:var(--text);font-family:var(--font);font-size:14px;font-weight:300;resize:none;line-height:1.5;max-height:120px;min-height:24px}
+textarea::placeholder{color:var(--text-3)}
+.send{width:36px;height:36px;background:var(--accent);border:none;border-radius:var(--r);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .14s;color:var(--bg)}
+.send:hover{background:#33ccff;transform:scale(1.06)}
+.send:disabled{background:var(--border);cursor:not-allowed;transform:none}
+.send svg{width:15px;height:15px}
+.new-btn{height:36px;background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r);cursor:pointer;color:var(--text-2);font-family:var(--font);font-size:12px;font-weight:300;padding:0 14px;transition:all .14s;white-space:nowrap}
+.new-btn:hover{border-color:var(--border-2);color:var(--text)}
+.err{background:rgba(255,77,106,.07);border:1px solid rgba(255,77,106,.25);border-radius:var(--r);padding:10px 14px;font-size:13px;font-weight:300;color:var(--red);margin-left:42px;max-width:460px;animation:fadeUp .18s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <div class="brand">
+      <div class="brand-icon">⚕</div>
+      <span class="brand-name">Clinical Trial Research Agent</span>
+    </div>
+    <div class="header-right">
+      <span class="pill" id="sid">session: 31e87867</span>
+      <span class="pill live">● pharma</span>
+    </div>
+  </header>
+
+  <div class="messages" id="msgs">
+    <div class="msg user"><div class="av user">U</div><div class="bubble">search for cancer trails</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="hitl"><div class="hitl-tag">Clarification needed</div><div class="hitl-q">Your query on cancer trials was broad. Could you specify what type of information you are looking for?</div><div class="hitl-opts"><button class="hitl-opt" onclick="pick(this,&#39;Molecular Profiling-Based Assignment of Cancer Therapy (NCI-MPACT)&#39;)" style="pointer-events: none;"><span class="num">1</span><span>Molecular Profiling-Based Assignment of Cancer Therapy (NCI-MPACT)</span></button><button class="hitl-opt" onclick="pick(this,&#39;Molecular Analysis for Therapy Choice (NCI-MATCH) study&#39;)" style="pointer-events: none;"><span class="num">2</span><span>Molecular Analysis for Therapy Choice (NCI-MATCH) study</span></button><button class="hitl-opt picked" onclick="pick(this,&#39;Gruppo Oncologico Dell\&#39;Italia Meridionale colorectal cancer study&#39;)" style="pointer-events: none;"><span class="num">3</span><span>Gruppo Oncologico Dell'Italia Meridionale colorectal cancer study</span></button><button class="hitl-opt" onclick="pick(this,&#39;SAFIR01/UNICANCER metastatic breast cancer study&#39;)" style="pointer-events: none;"><span class="num">4</span><span>SAFIR01/UNICANCER metastatic breast cancer study</span></button><button class="hitl-opt" onclick="pick(this,&#39;PRIME study for metastatic colorectal cancer&#39;)" style="pointer-events: none;"><span class="num">5</span><span>PRIME study for metastatic colorectal cancer</span></button></div><div class="hitl-hint">Or type your answer below</div></div><div class="msg user"><div class="av user">U</div><div class="bubble">Gruppo Oncologico Dell'Italia Meridionale colorectal cancer study</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="msg agent"><div class="av agent">AI</div><div class="bubble"><p>The Gruppo Oncologico Dell'Italia Meridionale has conducted several important phase III studies in colorectal cancer tNotably, their research includes the comparison of different chemotherapy regimens for advanced metastatic colorectal cancerre are details from two significant studies:</p>
+<ol><li><strong>Phase III Randomized Trial of F. FOLFOX4</strong>:</li>
+</ol>   This multicenter study compared the efficacy of OLFIRI (irinotecan, fluorouracil, and leucovorin) to FOLFOX4 (oxaliplatin, fluorouracil, an leucovorin) in the treatment of advanced colorectal cancer. The study was published in 2005 and provided insights into tffectiveness of these chemotherapy combinations [Source: Colucci et al., 2005, J Clin Oncol].
+<ol><li><strong>Randomised Trial Comparing Biweekly Oxaliplatin PluOral Capecitabine vs. Oxaliplatin Plus IV Bolus Fluorouracil/Leucovorin</strong>:</li>
+</ol>   This study was  part of the Southern Italy Cooperative Oncology study 0401. It evaluated whether adding oral capecitaatin could be as effective as the intravenous administration of fluorouracil and leucovorin in metastatic colotal cancer patients. The study results were published in 2009 [Source: Comella et al., 2009, J Cancer Res Clin Oncol].
+<p>These studies have contributed to the understanding and optimization of chemotherapy regimens in metastatic cectal cancer, aiding physicians in treatment planning.</p>
+<p>This information is for research purposes ony and does not constitute medical advice.</p><div class="meta-footer"><span>⏱ 13.9s</span><span>Research purposes only · Not medical advice</span></div></div></div><div class="msg user"><div class="av user">U</div><div class="bubble">what about other trails other than cancer?</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="hitl"><div class="hitl-tag">Clarification needed</div><div class="hitl-q">Your query on non-cancer trials was broad. Could you specify what type of clinical trials you are interested in?</div><div class="hitl-opts"><button class="hitl-opt picked" onclick="pick(this,&#39;Chemotherapy protocols excluding cancer&#39;)" style="pointer-events: none;"><span class="num">1</span><span>Chemotherapy protocols excluding cancer</span></button><button class="hitl-opt" onclick="pick(this,&#39;Investigational agents other than pembrolizumab&#39;)" style="pointer-events: none;"><span class="num">2</span><span>Investigational agents other than pembrolizumab</span></button><button class="hitl-opt" onclick="pick(this,&#39;Pembrolizumab ongoing clinical trials&#39;)" style="pointer-events: none;"><span class="num">3</span><span>Pembrolizumab ongoing clinical trials</span></button><button class="hitl-opt" onclick="pick(this,&#39;Other than specified protocols&#39;)" style="pointer-events: none;"><span class="num">4</span><span>Other than specified protocols</span></button><button class="hitl-opt" onclick="pick(this,&#39;Live vaccine-related trials&#39;)" style="pointer-events: none;"><span class="num">5</span><span>Live vaccine-related trials</span></button></div><div class="hitl-hint">Or type your answer below</div></div><div class="msg user"><div class="av user">U</div><div class="bubble">Chemotherapy protocols excluding cancer</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="msg agent"><div class="av agent">AI</div><div class="bubble"><p>The Gruppo Oncologico Dell'Italia Meridionale has conducted important phase III studies in colorectal cer treatment, including:</p>
+<ol><li><strong>Phase III Randomized Trial of FOLFIRI vs. FOFOX4</strong>: This multicenter study compared FOLFIRI (irinotecan, fluouracil, and leucovorin) to FOLFOX4 (oxaliplatin, fluorouracil, and leucovorin) in advanced colorectncer treatment. Published in 2005, it provided insights into chemotherapy effects [Source: Colucci et al., 2005, J Clin Oncol].</li>
+</ol>
+<ol><li><em>*Randomised Trial Comparing Biweeklaliplatin Plus Oral Capecitabine vs. Oxaliplatin Plus IV Bolus Fluorouracil/Leucovor</em>: Part of the Southern Italy Cooperative Oncology study 0401, this study evaluated the effectiveness of addtabine to oxaliplatin compared to intravenous administration of fluorouracil and leucovorin in metastatic colorectal cancer patients. Published in 2009 [Source: Comella et al., 2009, J Cancecol]. </li>
+</ol>
+These studies enhance understanding and optimization of chemotherapy regimens in metastatic colorectal cancer.The search for chemotherapy protocols excluding cancer did not yield specific clinical trial data on chemotherapy regimens used for non-cancer conditions. Genlly, chemotherapy is heavily associated with oncology due to its primary role in cancer treatment. For other medical conditions,emotherapy is less commonly applied and is often replaced by or concurrent with other forms of treatment like immunotherapy, bogical therapies, and supportive care measures.
+<p>If there is interest in oncology but with a focus on chemotherapy's non-traditional applications, the use of chemotherapy agents in combination with immunotherapy to modulate immune responsein cancer, such as in diffuse large B-cell lymphoma (DLBCL), is being explored for its potential to enhance immune therapy's iveness through tumor debulking and antigen shedding [Source: pinecone/clinical-trials-index].</p>
+<p>This information iesearch purposes only and does not constitute medical advice.</p><div class="meta-footer"><span>⏱ 9.8s</span><span>Research purposes only · Not medical advice</span></div></div></div><div class="msg user"><div class="av user">U</div><div class="bubble">another other important trails?</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="hitl"><div class="hitl-tag">Clarification needed</div><div class="hitl-q">Your query on important clinical trials is broad. Could you specify the therapeutic area or type of clinical trials you're interested in?</div><div class="hitl-opts"><button class="hitl-opt" onclick="pick(this,&#39;CLINICAL STUDY PROTOCOL&#39;)" style="pointer-events: none;"><span class="num">1</span><span>CLINICAL STUDY PROTOCOL</span></button><button class="hitl-opt" onclick="pick(this,&#39;Clinical trial objectives&#39;)" style="pointer-events: none;"><span class="num">2</span><span>Clinical trial objectives</span></button><button class="hitl-opt" onclick="pick(this,&#39;Overall clinical trial description&#39;)" style="pointer-events: none;"><span class="num">3</span><span>Overall clinical trial description</span></button><button class="hitl-opt picked" onclick="pick(this,&#39;Ongoing Clinical Studies&#39;)" style="pointer-events: none;"><span class="num">4</span><span>Ongoing Clinical Studies</span></button><button class="hitl-opt" onclick="pick(this,&#39;Clinical trial assessment&#39;)" style="pointer-events: none;"><span class="num">5</span><span>Clinical trial assessment</span></button></div><div class="hitl-hint">Or type your answer below</div></div><div class="msg user"><div class="av user">U</div><div class="bubble">Ongoing Clinical Studies</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="msg agent"><div class="av agent">AI</div><div class="bubble"><p>Current ongoing clinical studies include those involving the drug atezolizumab, which is approved fthe treatment of various cancers such as locally advanced or metastatic urothelial bladder cancer andtastatic non-small cell lung cancer (NSCLC). Atezolizumab is under investigation in multiple Phase I, II, anstudies, both as a monotherapy and in combination with other anti-cancer therapies. The studies seek to furtheevaluate its safety, tolerability, immunogenicity, pharmacokinetics, and biological activity in patients with various solid and hematologic malignancies [Source: pinecone/clinical-trials-index].</p>
+<p>These trials aim to expand the understatezolizumab's application and effectiveness across different cancer types and therapeutic strategies.</p>
+<p>This information is for resear purposes only and does not constitute medical advice.</p><div class="meta-footer"><span>⏱ 5.3s</span><span>Research purposes only · Not medical advice</span></div></div></div><div class="msg user"><div class="av user">U</div><div class="bubble">can you get me info about NCT03662659?</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Querying knowledge graph…</span></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="msg agent"><div class="av agent">AI</div><div class="bubble"><p>The clinical trial with the identifier NCT03662659 is titled "An Investigational Study of Iherapy Combinations With Chemotherapy in Patients With Gastric or Gastroesophageal Junction (GEJ) Cancers." This is a Phase 2 study that has been completed. The trial enrolled 274 participace: neo4j/clinical-trials].</p>
+<p>Unfortunately, further detailed information about the trial design or outcomes was not found in the currenrch results.</p><div class="meta-footer"><span>⏱ 10.0s</span><span>Research purposes only · Not medical advice</span></div></div></div><div class="msg user"><div class="av user">U</div><div class="bubble">do a little deeper search</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="msg agent"><div class="av agent">AI</div><div class="bubble"><p>I was unable to retrieve more detailed information on the trial NCT03662659 from the search resavailable. The specific search did not yield additional data beyond what has been previously provided, which indicates the trtled "An Investigational Study of Immunotherapy Combinations With Chemotherapy in Patients With GastrGastroesophageal Junction (GEJ) Cancers," completed in Phase 2, with an enrollmf 274 participants [Source: neo4j/clinical-trials].</p>
+<p>If more specific details are needed, the ClinicalTrials.gov websie a resourceful platform to find detailed protocols, results, and updates.</p>
+<p>This information is for research puroses only and does not constitute medical advice.</p><div class="meta-footer"><span>⏱ 5.6s</span><span>Research purposes only · Not medical advice</span></div></div></div><div class="msg user"><div class="av user">U</div><div class="bubble">then what else you can provide?</div></div><div class="msg agent"><div class="av agent">AI</div><div class="bubble"><p>Unfortunately, I couldn't find additional details about trial NCT03662659 in the providrces. However, I can assist with the following:</p>
+<ol><li><strong>Search for Related Trials or Studies</strong>: I can search for r trials involving similar drugs or conditions, such as immunotherapy combinations in gastric or gastroesophageal can <strong>Explore Trial Outcomes</strong>: If you're interested in general outcomes of similar studies on immunotherapy in gtric cancer, I can search for that information.</li>
+</ol>
+<ol><li><strong>Drug-Specific Information</strong>: If you're interested idrugs used, such as the types of immunotherapy in this trial, I can find additional data on those.</li>
+</ol>
+Please let me now which specific aspect you would like to explore further, or if there is anything else you are specifically interested in regarding ongo clinical studies or trial methodology.<div class="meta-footer"><span>⏱ 5.0s</span><span>Research purposes only · Not medical advice</span></div></div></div><div class="msg user"><div class="av user">U</div><div class="bubble">Need information related to Nivolumab</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Querying knowledge graph…</span></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="msg agent"><div class="av agent">AI</div><div class="bubble"><p>Current ongoing clinical studies include those involving the drug atezolizumab, whpproved for the treatment of various cancers such as locally advanced or metastatic urothelial bladder caer and metastatic non-small cell lung cancer (NSCLC). Atezolizumab is under investigation in multe Phase I, II, and III studies, both as a monotherapy and in combination with other anti-cancer therapies.</p>
+<p>Thclinical trial with the identifier NCT03662659 is titled "An Investigational Study of Immunotherapy Combinations With Chemothepy in Patients With Gastric or Gastroesophageal Junction (GEJ) Cancers." This is a Phase 2 study that has been completed, enrolling 274 participants.Nivolumab, an immune checkpbitor targeting PD-1, is being evaluated in various clinical settings, including combinations with other agelatlimab and chemotherapy. Notably, in a Phase 2 randomized, open-label study (CA224060), approximately 250participants with untreated, unresectable, locally advanced, or metastatic gastric cancer (GC) or gesophageal junction (GEJ) adenocarcinoma are randomized into two treatment arms: one receiving nivoluab monotherapy, and the other a fixed-dose combination (FDC) of relatlimab and nivolumab alongside investigator's choice chemotherapy.</p>
+<p>Nivolumab is administered intravenously at doses of either 360 mg every 3 weeks (Q3W) or 480 mg every 4 weeks (Q4W), depending on the cheherapy regimen, while the FDC of relatlimab and nivolumab is given  120 mg relatlimab/360 mg nivolumab Q3W or 160 mg relatlimab/480 mg nivolumaW.</p>
+<p>The safety profile of nivolumab, both as monotherapy and in combination with relatlimab, includes a defined n of immune-mediated adverse events (IMAEs). Most high-grade IMAEs are manageable with corticosteroids or hormone replace therapy. The combination of nivolumab with chemotherapy has shown additive toxicity without new safety signals. An independent Data Monring Committee (DMC) is overseeing the ongoing assessment of safety and efficacy throughout the trial.</p>
+<p>This information is for resech purposes only and does not constitute medical advice.</p><div class="meta-footer"><span>⏱ 49.1s</span><span>Research purposes only · Not medical advice</span></div></div></div><div class="msg user"><div class="av user">U</div><div class="bubble">get me the list to completed trails?</div></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Searching knowledge base…</span></div><div class="tool-step done"><span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span><span>Querying knowledge graph…</span></div><div class="msg agent"><div class="av agent">AI</div><div class="bubble"><p>Here is a list of some completed clinical tr along with their details:</p>
+<ol><li><strong>NCT04652245</strong>: "Dymista Allergen Camber - Onset of Action Study" - Phase 4</li>
+<li><strong>NCT04280705</strong>: "Adapti COVID-19 Treatment Trial (ACTT)" - Phase 3</li>
+<li><strong>NCT04614948</strong>: "A Study of Ad26.COV2.S for the Prevention of SARS-CoV-2-mediated COVID-19Adults" - Phase 3</li>
+<li><strong>NCT04368728</strong>: "Study to Describe the Safety, Tolerability, Immunogenic, and Efficacy of RNA Vaccine Candidates Against COVID-19 in Hthy Individuals" - Phase 2/3</li>
+<li><strong>NCT04470427</strong>: "A Study to Evaluate Efficacy, Saety, and Immunogenicity of mRNA-1273 Vaccine in Adults Aged 18 Yea and Older to Prevent COVID-19" - Phase 3</li>
+<li><strong>NCT03235752</strong>: "Safety and Efficacy o1 IV in Participants With Active Ulcerative Colitis" - Phase 2</li>
+<li>**NCT039612g-Term Outcomes and Durability of Effect Following Treatment With Cladribine Tablets for MS (CLASSIC-MS)" - Phase 4</li>
+<li><strong>NCT03164772</strong>: "Phase 1/2 Studyf Combination Immunotherapy and Messenger Ribonucleic Acid (m) Vaccine in Subjects With NSCLC" - Phase 1/2</li>
+<li><strong>NCT0318150</strong>: "Safety and Efficacy of Nemolizumab in PN" - Phase 2</li>
+<li><strong>NCT0343</strong>: "A Study of Atezolizumab in Combination With Bevacizumab Compared With Sorafenib in Patients With Untreated Locally Advanced or Metastatic Hepatocellular Carcinoma" - Phase 3</li>
+</ol>
+This information is for resech purposes only and does not constitute medical advice.<div class="meta-footer"><span>⏱ 13.1s</span><span>Research purposes only · Not medical advice</span></div></div></div></div>
+
+  <div class="bar">
+    <div class="inp-wrap">
+      <textarea id="inp" placeholder="Ask about a trial, drug, or clinical outcome…" rows="1" style="height: auto;"></textarea>
+    </div>
+    <button class="send" id="sbtn" onclick="send()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="22" y1="2" x2="11" y2="13"></line>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+      </svg>
+    </button>
+    <button class="new-btn" onclick="newChat()">+ New</button>
+  </div>
+</div>
+
+<script>
+const STARTERS = [
+  "What are the Phase 3 efficacy results for Pfizer BNT162b2?",
+  "Tell me about the COVID vaccine trial",
+  "Is mRNA-1273 safe for patients with heart failure?",
+  "Which trials study remdesivir for COVID-19?",
+  "What are the primary outcomes for the Moderna vaccine trial NCT04470427?",
+  "Who sponsors the Hepatitis B TAF trial?",
+];
+
+// UUID fallback — crypto.randomUUID() only works on HTTPS (secure context)
+// The ALB runs on HTTP so we need a Math.random() fallback
+function uuid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0;
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+  });
+}
+
+// inp declared first so send() can reference it without hoisting issues
+const inp = document.getElementById('inp');
+
+let threadId    = uuid();
+let interrupted = false;
+let streaming   = false;
+
+document.getElementById('sid').textContent = 'session: ' + threadId.slice(0, 8);
+
+// Starter chips
+const startersEl = document.getElementById('starters');
+STARTERS.forEach(q => {
+  const b = document.createElement('button');
+  b.className = 'starter';
+  b.textContent = q;
+  b.onclick = () => submit(q);
+  startersEl.appendChild(b);
+});
+
+// Auto-resize textarea
+inp.addEventListener('input', () => {
+  inp.style.height = 'auto';
+  inp.style.height = Math.min(inp.scrollHeight, 120) + 'px';
+});
+inp.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+
+// ── Send ──────────────────────────────────────────────────────────────────
+function send() {
+  const t = inp.value.trim();
+  if (!t || streaming) return;
+  inp.value = ''; inp.style.height = 'auto';
+  submit(t);
+}
+
+async function submit(text) {
+  hideWelcome();
+  addUser(text);
+  if (interrupted) await doResume(text);
+  else await doChat(text);
+}
+
+async function doChat(msg) {
+  await sse('/chat', { message: msg, thread_id: threadId, domain: 'pharma' });
+}
+async function doResume(ans) {
+  interrupted = false;
+  await sse('/resume', { thread_id: threadId, user_answer: ans, domain: 'pharma' });
+}
+
+// ── SSE stream ────────────────────────────────────────────────────────────
+async function sse(url, payload) {
+  streaming = true;
+  setDisabled(true);
+
+  // Show "Thinking…" immediately — before first event arrives (~1-2s gap)
+  // This prevents the blank period after sending a message
+  // toolEls is a stack — multiple tools can run concurrently (search + graph)
+  let toolEls    = [addToolStep('Thinking…', true)];
+  let agentEl    = null;
+  let content    = '';
+  let latency    = 0;
+  let started    = false;
+  let firstEvent = true;
+
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify(payload),
+    });
+
+    const reader  = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let   buf     = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice(6).trim();
+        if (!raw || raw === '[DONE]') continue;
+        let ev; try { ev = JSON.parse(raw); } catch { continue; }
+        const t = ev.type || '';
+
+        // Remove "Thinking…" on first real event
+        if (firstEvent) {
+          toolEls.forEach(el => el.remove());
+          toolEls = [];
+          firstEvent = false;
+        }
+
+        if (t === 'tool_start') {
+          toolEls.push(addToolStep(toolLabel(ev.name), false));
+          continue;
+        }
+        if (t === 'tool_end') {
+          // Mark the most recent active (non-done) tool step as done
+          const active = toolEls.filter(el => !el.classList.contains('done'));
+          if (active.length > 0) markDone(active[active.length-1], toolLabel(ev.name));
+          continue;
+        }
+        if (t === 'interrupt') {
+          toolEls.filter(el => !el.classList.contains('done'))
+            .forEach(el => markDone(el, 'Clarification needed'));
+          toolEls = [];
+          addHITL(ev.question || 'Please clarify:', ev.options || [], ev.allow_freetext !== false);
+          interrupted = true; streaming = false; setDisabled(false); return;
+        }
+        if (t === 'error') {
+          toolEls.forEach(el => el.remove()); toolEls = [];
+          addErr(ev.message || 'Unknown error');
+          break;
+        }
+        if (t === 'done') {
+          latency = ev.latency_ms || 0;
+          continue;
+        }
+
+        const token = ev.content || ev.result || ev.token || '';
+        if (token) {
+          if (!started) {
+            // Mark all active tool steps done when answer starts streaming
+            toolEls.filter(el => !el.classList.contains('done'))
+              .forEach(el => markDone(el, 'Done'));
+            toolEls = [];
+            agentEl = addAgentBubble();
+            started = true;
+          }
+          content += token;
+          streamToken(agentEl, content);
+        }
+      }
+    }
+
+    if (started && agentEl) {
+      const cleaned = clean(content);
+      if (!cleaned) addErr('Response could not be displayed — try + New for a fresh session.');
+      else finalize(agentEl, cleaned, latency);
+    } else if (!started && !interrupted) addErr('No response received.');
+
+  } catch (e) {
+    addErr('Connection error: ' + e.message);
+  } finally {
+    // Clean up any lingering tool step indicators
+    toolEls.forEach(el => el.remove());
+    toolEls = [];
+    streaming = false;
+    setDisabled(false);
+    scrollEnd();
+  }
+}
+
+// ── DOM helpers ───────────────────────────────────────────────────────────
+function hideWelcome() {
+  const w = document.getElementById('welcome');
+  if (w) w.remove();
+}
+function scrollEnd() {
+  const m = document.getElementById('msgs');
+  m.scrollTop = m.scrollHeight;
+}
+function addUser(text) {
+  const m = document.getElementById('msgs');
+  const d = document.createElement('div');
+  d.className = 'msg user';
+  d.innerHTML = `<div class="av user">U</div><div class="bubble">${esc(text)}</div>`;
+  m.appendChild(d); scrollEnd();
+}
+function addAgentBubble() {
+  const m = document.getElementById('msgs');
+  const d = document.createElement('div');
+  d.className = 'msg agent';
+  d.innerHTML = `<div class="av agent">AI</div><div class="bubble"><span class="st"></span><span class="cur"></span></div>`;
+  m.appendChild(d); scrollEnd();
+  return d;
+}
+function streamToken(el, content) {
+  const st = el.querySelector('.st');
+  if (st) st.textContent = content;
+  scrollEnd();
+}
+// Inline markdown renderer — no CDN dependency
+// Handles: headers, bold, italic, code, lists, blockquote, hr, links, tables
+function mdParse(t) {
+  // Escape HTML in code blocks first
+  t = t.replace(/```([\s\S]*?)```/g, (_, c) =>
+    '<pre><code>' + c.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code></pre>');
+  t = t.replace(/`([^`]+)`/g, (_, c) =>
+    '<code>' + c.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code>');
+  // Headers
+  t = t.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  t = t.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  t = t.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Bold / italic
+  t = t.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  t = t.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // Blockquote
+  t = t.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+  // HR
+  t = t.replace(/^---+$/gm, '<hr>');
+  // Unordered lists — tag with uli to avoid merging with ordered
+  t = t.replace(/^[\*\-] (.+)$/gm, '<uli>$1</uli>');
+  t = t.replace(/(<uli>.*<\/uli>\n?)+/g, s => '<ul>' + s.replace(/uli>/g,'li>') + '</ul>');
+  // Ordered lists — tag with oli to avoid merging with unordered
+  t = t.replace(/^\d+\. (.+)$/gm, '<oli>$1</oli>');
+  t = t.replace(/(<oli>.*<\/oli>\n?)+/g, s => '<ol>' + s.replace(/oli>/g,'li>') + '</ol>');
+  // Links
+  t = t.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+  // Tables (simple)
+  t = t.replace(/^\|(.+)\|$/gm, (_, row) => {
+    if (row.includes('---')) return '';
+    const cells = row.split('|').map(c => c.trim());
+    return '<tr>' + cells.map(c => `<td>${c}</td>`).join('') + '</tr>';
+  });
+  t = t.replace(/(<tr>.*<\/tr>\n?)+/g, s => '<table>' + s + '</table>');
+  // Paragraphs — wrap non-tag lines
+  t = t.split('\n\n').map(block => {
+    if (/^<(h[1-6]|ul|ol|li|pre|blockquote|hr|table|tr)/.test(block.trim())) return block;
+    const trimmed = block.trim();
+    if (!trimmed) return '';
+    return '<p>' + trimmed.replace(/\n/g, ' ') + '</p>';
+  }).join('\n');
+  return t;
+}
+
+function finalize(el, content, latency) {
+  const b = el.querySelector('.bubble');
+  if (!b) return;
+  const c = b.querySelector('.cur'); if (c) c.remove();
+  b.innerHTML = mdParse(content);
+  if (latency > 0) {
+    const f = document.createElement('div');
+    f.className = 'meta-footer';
+    f.innerHTML = `<span>⏱ ${(latency/1000).toFixed(1)}s</span><span>Research purposes only · Not medical advice</span>`;
+    b.appendChild(f);
+  }
+  scrollEnd();
+}
+function addToolStep(label, thinking = false) {
+  const m = document.getElementById('msgs');
+  const d = document.createElement('div');
+  d.className = 'tool-step' + (thinking ? ' thinking' : '');
+  d.innerHTML = `<div class="spin${thinking ? ' pulse' : ''}"></div><span>${esc(label)}</span>`;
+  m.appendChild(d); scrollEnd();
+  return d;
+}
+function markDone(el, label) {
+  el.classList.add('done');
+  el.classList.remove('thinking');
+  const sp = el.querySelector('.spin');
+  const tx = el.querySelector('span:last-child');
+  if (sp) sp.outerHTML = '<span style="color:var(--green);font-size:13px;flex-shrink:0">✓</span>';
+  if (tx && label) tx.textContent = label;
+  scrollEnd();
+}
+function addHITL(question, options, ft) {
+  const m = document.getElementById('msgs');
+  const c = document.createElement('div');
+  c.className = 'hitl';
+  const opts = options.map((o, i) =>
+    `<button class="hitl-opt" onclick="pick(this,'${escA(o)}')">`+
+    `<span class="num">${i+1}</span><span>${esc(o)}</span></button>`
+  ).join('');
+  c.innerHTML =
+    `<div class="hitl-tag">Clarification needed</div>`+
+    `<div class="hitl-q">${esc(question)}</div>`+
+    `<div class="hitl-opts">${opts}</div>`+
+    (ft ? `<div class="hitl-hint">Or type your answer below</div>` : '');
+  m.appendChild(c); scrollEnd();
+}
+function pick(btn, val) {
+  btn.closest('.hitl-opts').querySelectorAll('.hitl-opt')
+    .forEach(b => b.style.pointerEvents = 'none');
+  btn.classList.add('picked');
+  addUser(val);
+  doResume(val);
+}
+function addErr(msg) {
+  const m = document.getElementById('msgs');
+  const d = document.createElement('div');
+  d.className = 'err';
+  d.textContent = '⚠ ' + msg;
+  m.appendChild(d); scrollEnd();
+}
+function setDisabled(v) { document.getElementById('sbtn').disabled = v; }
+function newChat() {
+  threadId = uuid(); interrupted = false; streaming = false;
+  document.getElementById('sid').textContent = 'session: ' + threadId.slice(0, 8);
+  const m = document.getElementById('msgs');
+  m.innerHTML = `
+    <div class="welcome" id="welcome">
+      <div class="welcome-eyebrow">Vidya Sankalp · AgentCore Platform</div>
+      <div class="welcome-title">Clinical Trial<br><span>Intelligence</span></div>
+      <p class="welcome-sub">Search 5,772 trial documents and a live biomedical knowledge graph.</p>
+      <div class="starters-label">Try one of these</div>
+      <div class="starters" id="starters"></div>
+    </div>`;
+  const s = document.getElementById('starters');
+  STARTERS.forEach(q => {
+    const b = document.createElement('button');
+    b.className = 'starter'; b.textContent = q;
+    b.onclick = () => submit(q);
+    s.appendChild(b);
+  });
+  setDisabled(false);
+  inp.value = ''; inp.style.height = 'auto';
+}
+
+// ── Utils ─────────────────────────────────────────────────────────────────
+function toolLabel(n) {
+  if (!n) return 'Processing…';
+  if (n.includes('search'))     return 'Searching knowledge base…';
+  if (n.includes('graph'))      return 'Querying knowledge graph…';
+  if (n.includes('summariser')) return 'Synthesising results…';
+  if (n.includes('ask_user'))   return 'Preparing clarification…';
+  return n;
+}
+function clean(t) {
+  // Strip EPISODIC tag
+  t = t.replace(/\n?EPISODIC:\s*(YES|NO)[\d.\s]*/gi, '');
+  // Strip duplicate disclaimer
+  t = t.replace(/\n?This information is for research purposes only and does not constitute medical advice\.?\s*/gi, '');
+  // Strip guardrail reason
+  t = t.replace(/\n?\[Reason logged for review:.*?\]\s*/gis, '');
+
+  // Strip SummarizationMiddleware summary leaking into response.
+  // Summaries arrive in two formats:
+  //   WITH dash:    "- User inquired about cancer trials..."
+  //   WITHOUT dash: "User inquired about other trials in the database..."
+  // Both formats need to be stripped.
+
+  // Strip bullet-point summary lines
+  t = t.replace(/^[-•]\s+(User (inquired|asked|mentioned|expressed)|AI (provided|gave|discussed)|The (user|AI|agent)|Overall,|Key points)[^\n]*/gim, '');
+
+  // Detect if ENTIRE response is a summary leak (with or without bullet prefix).
+  // Summarization HumanMessage starts with "Here is a summary of the conversation to date"
+  // but the LLM echoes it in its own words starting with "User inquired..." or
+  // "A tool was called..." or similar summary-style openings.
+  const summaryStart = /^(User (inquired|asked|mentioned)|A tool was called|The (user|AI|agent) (inquired|asked|provided|discussed)|Here is a summary)/i;
+  if (summaryStart.test(t.trim())) {
+    // Whole response is a summary echo — strip the leading summary paragraph
+    // and keep only content after the first double newline (the actual answer)
+    const parts = t.split(/\n\n+/);
+    // Find first part that doesn't look like a summary
+    const realContent = parts.find(p =>
+      p.trim().length > 0 &&
+      !summaryStart.test(p.trim()) &&
+      !/^[-•]\s+(User|AI|The user|The agent)/i.test(p.trim())
+    );
+    if (realContent) t = parts.slice(parts.indexOf(realContent)).join('\n\n');
+    else return ''; // entire response was summary — show nothing
+  }
+
+  return t.trim();
+}
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escA(s) { return String(s).replace(/'/g, "\\'"); }
+</script>
+
+</body></html>
