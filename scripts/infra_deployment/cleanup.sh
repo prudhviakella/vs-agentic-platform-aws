@@ -617,7 +617,7 @@ step_redeploy() {
     aws ecs update-service \
       --cluster "${PREFIX}-cluster" \
       --service "${PREFIX}-platform" \
-      --force-new-deployment \
+      --force-new-infra_deployment \
       --region "${REGION}" \
       --query "service.deployments[0].{id:id, state:rolloutState}" \
       --output table
@@ -628,7 +628,7 @@ step_redeploy() {
     aws ecs update-service \
       --cluster "${PREFIX}-cluster" \
       --service "${PREFIX}-ui" \
-      --force-new-deployment \
+      --force-new-infra_deployment \
       --region "${REGION}" \
       --query "service.deployments[0].{id:id, state:rolloutState}" \
       --output table

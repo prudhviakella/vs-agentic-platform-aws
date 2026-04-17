@@ -121,7 +121,7 @@ THRESHOLDS EXPLANATION:
   faithfulness_threshold=0.00
     GPT-4o-mini scores faithfulness as 0.0–1.0 where 1.0 = perfectly faithful.
     Production data shows scores clustering around 0.80–1.00 for well-grounded
-    answers. We set 0.00 (disabled) during initial deployment to avoid blocking
+    answers. We set 0.00 (disabled) during initial infra_deployment to avoid blocking
     valid responses while we calibrate the expected score distribution.
     TODO: raise to 0.70 after 500+ production traces confirm the baseline.
 

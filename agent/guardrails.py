@@ -191,7 +191,7 @@ def check_toxic(text: str) -> tuple[bool, str]:
         (True, "")             — clean
         (False, reason_string) — toxic pattern matched, block the request
 
-    NOTE: Extend _TOXIC_PATTERNS for your specific deployment context.
+    NOTE: Extend _TOXIC_PATTERNS for your specific infra_deployment context.
     A children's health platform would add more conservative patterns.
     A general research tool might have fewer restrictions.
 

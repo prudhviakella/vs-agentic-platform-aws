@@ -23,7 +23,7 @@ WHY BEDROCK PROMPT MANAGEMENT INSTEAD OF A HARDCODED STRING?
     2. Click "Publish version" (creates version N+1 with the old version intact)
     3. Update one SSM parameter: /clinical-trial-agent/prod/bedrock/prompt_version
     4. The next AgentCore cold start loads the new version automatically
-    Total: ~30 seconds, zero deployment
+    Total: ~30 seconds, zero infra_deployment
 
   ADDITIONAL BENEFITS:
     - Version history: every published version is preserved, full audit trail

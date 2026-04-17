@@ -617,6 +617,310 @@ aws bedrock-agentcore invoke-agent-runtime \
 
 ---
 
+## Local Development & Testing
+
+Everything can be run and tested locally before deploying to AWS. This is the fastest way to iterate on agent logic, prompts, Lambda tools, and the UI.
+
+---
+
+### Prerequisites for Local Dev
+
+```bash
+pip install -r agent/requirements.txt
+pip install -r platform/requirements.txt
+pip install -r ui/requirements.txt
+```
+
+Create a local `.env.local` file (copy from `.env.prod` but use local values):
+```bash
+cp .env.prod .env.local
+source .env.local
+```
+
+---
+
+### 1. Run the Agent Locally (no AgentCore, no Docker)
+
+The LangGraph agent runs directly as a Python process — no AWS AgentCore needed:
+
+```bash
+cd agent
+source ../.env.local
+
+# Run a single query directly
+python3 - << 'EOF'
+import asyncio
+from app import create_agent
+
+async def main():
+    agent = await create_agent()
+    session_id = "local-test-001"
+    async for event in agent.astream({
+        "message": "What are the Phase 3 results for Pfizer BNT162b2?",
+        "thread_id": session_id,
+        "domain": "pharma",
+        "resume": False
+    }):
+        print(event)
+
+asyncio.run(main())
+EOF
+```
+
+---
+
+### 2. Run the Platform API Locally
+
+```bash
+cd platform
+source ../.env.local
+
+# Point to local agent instead of AgentCore Runtime
+export AGENT_MODE=local   # if supported by your platform/app.py
+
+uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Test it:
+```bash
+SESSION_ID=$(python3 -c "import uuid; print(str(uuid.uuid4()))")
+
+curl -X POST http://localhost:8000/api/v1/clinical-trial/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: ${PLATFORM_API_KEY}" \
+  -d "{\"message\": \"What trials exist for semaglutide?\", \"thread_id\": \"${SESSION_ID}\", \"domain\": \"pharma\"}"
+```
+
+---
+
+### 3. Run the UI Locally
+
+```bash
+cd ui
+source ../.env.local
+
+export AGENT_API_URL=http://localhost:8000
+export AGENT_DOMAIN=pharma
+export AGENT_API_KEY=${PLATFORM_API_KEY}
+
+uvicorn app:app --host 0.0.0.0 --port 8501 --reload
+```
+
+Open: http://localhost:8501
+
+---
+
+### 4. Test Lambda Tools Locally
+
+Each Lambda tool is a standalone Python function — invoke the handler directly:
+
+```bash
+# Test search_tool
+cd mcp_tools/search_lambda
+source ../../.env.local
+
+python3 - << 'EOF'
+from handler import handler
+result = handler({"query": "semaglutide Phase 3 results", "top_k": 3}, {})
+import json; print(json.dumps(result, indent=2))
+EOF
+```
+
+```bash
+# Test graph_tool
+cd mcp_tools/graph_lambda
+source ../../.env.local
+
+python3 - << 'EOF'
+from handler import handler
+result = handler({"cypher": "MATCH (t:Trial) RETURN t.nctId, t.briefTitle LIMIT 5"}, {})
+import json; print(json.dumps(result, indent=2))
+EOF
+```
+
+```bash
+# Test summariser_tool
+cd mcp_tools/summariser_lambda
+source ../../.env.local
+
+python3 - << 'EOF'
+from handler import handler
+result = handler({
+    "chunks": [
+        "The BNT162b2 vaccine showed 95% efficacy in preventing COVID-19.",
+        "The trial enrolled 43,548 participants across multiple sites."
+    ],
+    "query": "What were the efficacy results?"
+}, {})
+import json; print(json.dumps(result, indent=2))
+EOF
+```
+
+---
+
+### 5. Run with Docker Compose (full local stack)
+
+Run the entire platform locally with Docker Compose — no AWS needed except for Pinecone, Neo4j, and OpenAI:
+
+```bash
+# Build all images locally
+docker compose build
+
+# Start platform API + UI
+docker compose up
+
+# UI:      http://localhost:8501
+# API:     http://localhost:8000
+# Health:  http://localhost:8000/health
+```
+
+`docker-compose.yml` example:
+```yaml
+version: "3.9"
+services:
+  platform:
+    build: ./platform
+    ports: ["8000:8000"]
+    env_file: .env.local
+    environment:
+      - AGENT_MODE=local
+
+  ui:
+    build: ./ui
+    ports: ["8501:8501"]
+    env_file: .env.local
+    environment:
+      - AGENT_API_URL=http://platform:8000
+      - AGENT_DOMAIN=pharma
+    depends_on: [platform]
+```
+
+---
+
+### 6. Test Individual Middleware Layers
+
+Test each middleware layer in isolation:
+
+```bash
+cd agent
+source ../.env.local
+
+# Test SemanticCacheMiddleware
+python3 - << 'EOF'
+import asyncio
+from core.middleware.semantic_cache import SemanticCacheMiddleware
+
+async def test():
+    mw = SemanticCacheMiddleware()
+    result = await mw.check_cache(
+        query="What are the Phase 3 results for BNT162b2?",
+        domain="pharma"
+    )
+    print(f"Cache hit: {result is not None}")
+    print(result)
+
+asyncio.run(test())
+EOF
+```
+
+```bash
+# Test TracerMiddleware — verify DynamoDB write
+python3 - << 'EOF'
+import asyncio, uuid
+from core.middleware.tracer import TracerMiddleware
+
+async def test():
+    run_id = str(uuid.uuid4())
+    tm = TracerMiddleware()
+    await tm.init_trace(run_id, {
+        "question": "test query",
+        "domain": "pharma",
+        "session_id": run_id
+    })
+    await tm.finalize_trace(run_id, {
+        "answer": "test answer",
+        "total_tokens": 100,
+        "token_cost_usd": 0.001,
+        "elapsed_ms": 1500
+    })
+    print(f"Trace written: {run_id}")
+    # Check DynamoDB
+    import boto3
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table("vs-agentcore-traces")
+    item = table.get_item(Key={"run_id": run_id}).get("Item")
+    print(f"DynamoDB record: {item is not None}")
+
+asyncio.run(test())
+EOF
+```
+
+---
+
+### 7. Test Neo4j Connection
+
+```bash
+python3 - << 'EOF'
+import os
+from neo4j import GraphDatabase
+
+driver = GraphDatabase.driver(
+    os.environ["NEO4J_URI"],
+    auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"])
+)
+with driver.session() as session:
+    result = session.run("MATCH (t:Trial) RETURN t.nctId, t.briefTitle LIMIT 5")
+    for r in result:
+        print(r["t.nctId"], "-", r["t.briefTitle"])
+driver.close()
+EOF
+```
+
+---
+
+### 8. Test Pinecone Connection
+
+```bash
+python3 - << 'EOF'
+import os
+from pinecone import Pinecone
+
+pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+index = pc.Index(os.environ["CLINICAL_TRIALS_INDEX"])
+
+stats = index.describe_index_stats()
+print(f"Total vectors: {stats.total_vector_count}")
+print(f"Namespaces: {list(stats.namespaces.keys())}")
+
+# Test a query
+results = index.query(
+    vector=[0.0] * 1536,   # dummy vector — replace with real embedding
+    top_k=3,
+    include_metadata=True
+)
+print(f"Query returned {len(results.matches)} results")
+EOF
+```
+
+---
+
+### Local Testing Checklist
+
+Before deploying to AWS, verify locally:
+
+| Test | Command | Expected |
+|---|---|---|
+| Neo4j connection | `python3` + graph query above | 5 trial rows returned |
+| Pinecone connection | `python3` + stats above | total_vector_count > 0 |
+| search_tool | handler test above | results[] with score and text |
+| graph_tool | handler test above | results[] with nctId and briefTitle |
+| summariser_tool | handler test above | summary string returned |
+| Platform API health | `curl localhost:8000/health` | `{"status": "ok"}` |
+| UI loads | open localhost:8501 | Dark clinical UI appears |
+| Full query | curl /chat endpoint | SSE events stream |
+| HITL flow | vague query + resume | interrupt event + final answer |
+
+---
+
 ## Daily Development Workflow
 
 | What changed | Command |

@@ -204,9 +204,13 @@ resource "aws_lb_target_group" "ui" {
   target_type = "ip"
 
   health_check {
-    path     = "/healthz"
-    timeout  = 10
-    interval = 30
+    # FastAPI UI serves /health — was /healthz (Chainlit default) which caused
+    # ECS health checks to fail after switching from Chainlit to FastAPI+uvicorn
+    path                = "/health"
+    timeout             = 10
+    interval            = 30
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
   }
 }
 
@@ -380,8 +384,11 @@ resource "aws_ecs_task_definition" "ui" {
       { name = "AGENT_DOMAIN",  value = "pharma" }
     ]
     secrets = [{
+      # SSM path written by: ./scripts/deploy.sh secrets
+      # Key in .env.prod: PLATFORM_API_KEY
+      # Fix: was /clinical-agent/prod/platform/api_key which doesn't exist
       name      = "AGENT_API_KEY"
-      valueFrom = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/clinical-agent/prod/platform/api_key"
+      valueFrom = "arn:aws:ssm:${var.aws_region}:${local.account_id}:parameter/vs-agentcore/prod/platform_api_key"
     }]
     logConfiguration = {
       logDriver = "awslogs"
