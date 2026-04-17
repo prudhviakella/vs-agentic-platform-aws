@@ -241,6 +241,22 @@ resource "aws_lb_listener_rule" "platform_api" {
   }
 }
 
+resource "aws_lb_listener_rule" "platform_observability" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 11
+
+  action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.platform.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/observability*"]
+    }
+  }
+}
+
 # ── RDS Postgres ──────────────────────────────────────────────────────────
 
 resource "aws_security_group" "rds" {

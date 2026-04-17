@@ -40,11 +40,13 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 
 import boto3
+from decimal import Decimal
+
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, HTMLResponse
 
-from gateway.auth import verify_api_key
+from gateway.auth import verify_api_key, _get_api_key
 from gateway.rate_limiter import RateLimiter
 from gateway.schemas import ChatRequest, ResumeRequest
 from gateway.logging_mw import LoggingMiddleware
@@ -297,21 +299,63 @@ def _get_trace_table_name() -> str:
     )["Parameter"]["Value"]
 
 
+def _flatten_decimals(obj):
+    """Recursively convert DynamoDB Decimal types for JSON serialisation."""
+    if isinstance(obj, Decimal):
+        return float(obj) if "." in str(obj) else int(obj)
+    if isinstance(obj, list):
+        return [_flatten_decimals(i) for i in obj]
+    if isinstance(obj, dict):
+        return {k: _flatten_decimals(v) for k, v in obj.items()}
+    return obj
+
+
+@app.get("/observability", response_class=HTMLResponse)
+async def observability_dashboard():
+    """Serve the AgentCore Observability Dashboard."""
+    import os
+    html_path = os.path.join(os.path.dirname(__file__), "static", "traces_dashboard.html")
+    try:
+        with open(html_path) as f:
+            html = f.read()
+        # Inject API key so dashboard JS can call /api/v1/clinical-trial/traces
+        api_key = _get_api_key()
+        html = html.replace(
+            '</head>',
+            f'<script>window.PLATFORM_API_KEY = "{api_key}";</script></head>'
+        )
+        return HTMLResponse(content=html)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404,
+            detail="Dashboard not found. Copy traces_dashboard.html to platform/static/")
+
+
 @app.get(f"/api/v1/{AGENT}/traces")
 async def list_traces(
-    limit: int = 20,
+    limit: int = 200,
     _: str = Depends(verify_api_key),
 ):
     """
-    List recent agent traces from DynamoDB.
-    Each trace = one agent invocation: thread_id, latency, tools called, token count.
-    Used by developers to monitor production usage and debug issues.
+    Return all agent traces from DynamoDB for the observability dashboard.
+    Sorted by timestamp descending (newest first).
+    Decimal types are flattened for JSON serialisation.
     """
     try:
         dynamo = boto3.resource("dynamodb", region_name=REGION)
         table  = dynamo.Table(_get_trace_table_name())
-        resp   = table.scan(Limit=limit)
-        return {"traces": resp.get("Items", []), "count": len(resp.get("Items", []))}
+
+        items    = []
+        response = table.scan()
+        items.extend([_flatten_decimals(i) for i in response.get("Items", [])])
+
+        while "LastEvaluatedKey" in response:
+            response = table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+            items.extend([_flatten_decimals(i) for i in response.get("Items", [])])
+
+        # Sort newest first
+        items.sort(key=lambda x: float(x.get("ts", 0)), reverse=True)
+        return items[:limit]
+
     except Exception as exc:
         log.error(f"[PLATFORM] list_traces error: {exc}")
         raise HTTPException(status_code=500, detail=str(exc))

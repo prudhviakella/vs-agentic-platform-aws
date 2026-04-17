@@ -1,7 +1,7 @@
 #!/bin/bash
 # deploy.sh — vs-agentcore-platform-aws
 # ========================================
-# One-click infra_deployment for students.
+# One-click deployment for students.
 # Run individual steps or everything at once:
 #
 #   ./scripts/deploy.sh prompt     # Step 0: create/version Bedrock prompt → SSM
@@ -74,7 +74,7 @@ GATEWAY_NAME="${PREFIX}-mcp"
 ECR_BASE="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
 
 ACTION="${1:-plan}"
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
 echo "================================================"
 echo "VS AgentCore Platform — ${ACTION}"
@@ -825,7 +825,7 @@ step_redeploy() {
     aws ecs update-service \
       --cluster "${PREFIX}-cluster" \
       --service "${PREFIX}-platform" \
-      --force-new-infra_deployment \
+      --force-new-deployment \
       --region "${REGION}" \
       --query "service.deployments[0].{id:id,state:rolloutState}" \
       --output table
@@ -836,7 +836,7 @@ step_redeploy() {
     aws ecs update-service \
       --cluster "${PREFIX}-cluster" \
       --service "${PREFIX}-ui" \
-      --force-new-infra_deployment \
+      --force-new-deployment \
       --region "${REGION}" \
       --query "service.deployments[0].{id:id,state:rolloutState}" \
       --output table

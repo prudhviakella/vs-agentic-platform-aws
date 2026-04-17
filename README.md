@@ -1,5 +1,6 @@
 # VS AgentCore Platform — Clinical Trial Research Agent
 
+> **Vidya Sankalp · Applied GenAI Engineering**
 > A production multi-agent AI platform built on AWS Bedrock AgentCore for clinical trial research.
 
 ---
@@ -1108,7 +1109,60 @@ docker buildx build --platform linux/amd64 --output type=registry \
 
 ---
 
-## Observability
+## Observability Dashboard
+
+The platform ships a built-in observability dashboard that reads directly from DynamoDB and visualises every agent run in real time.
+
+**Access:**
+```
+http://<ALB-DNS>/observability
+```
+
+**Full dashboard — 13 real traces, $0.41 total cost, 85% HITL rate, tool usage donut:**
+
+![Observability Dashboard](docs/ss_obs_dashboard.png)
+
+**Trace detail panel — click any row to see full tool call chain, LLM timings, HITL options, guardrail scores:**
+
+![Trace Detail](docs/ss_obs_detail.png)
+
+### What the Dashboard Shows
+
+**Summary cards (top row):**
+
+| Card | What it measures |
+|---|---|
+| Total Queries | All agent runs in DynamoDB |
+| Total Cost | Sum of `token_cost_usd` across all traces |
+| Avg Latency | Mean `elapsed_ms` — includes tool calls and LLM turns |
+| Cache Hit Rate | % of queries served from Pinecone semantic cache (skips LLM entirely) |
+| HITL Fire Rate | % of queries that triggered a clarification interrupt |
+
+**Charts:**
+- **Queries per day** — bar chart, last 7 days
+- **Tool usage** — donut showing search / hitl / graph / summariser call counts
+- **Cost per day** — bar chart in USD, last 7 days
+
+**Trace table filters:**
+- **All** — every run
+- **HITL** — only runs that triggered a clarification interrupt
+- **Cache hits** — queries served from semantic cache
+- **Errors** — runs with middleware or tool errors
+- **Blocked** — runs where guardrail blocked the answer
+
+**Trace detail panel** (click any row):
+- Run ID, prompt version, domain, LLM turns, tool call count
+- Full question + answer text
+- Tool call chain — name, args summary, result summary for each call
+- LLM timings per turn — horizontal bar chart showing time + token count per turn
+- HITL card — question asked, all options shown, selected option highlighted
+- Guardrail score bars — faithfulness and consistency (threshold 0.7)
+
+### Auto-refresh
+
+The dashboard auto-refreshes every 30 seconds. The **● live** pill in the top right shows last updated time.
+
+---
 
 **Latest traces summary:**
 ```bash
@@ -1243,3 +1297,7 @@ Destroys all Terraform-managed resources: ECS cluster, ALB, RDS, DynamoDB table,
 - MCP Gateway → AWS Console → Bedrock → AgentCore → Gateways
 - ECR repositories → AWS Console → ECR
 - IAM roles → AWS Console → IAM
+
+---
+
+*Built for Vidya Sankalp Applied GenAI Engineering Program — Module 7: Agentic Systems on AWS*
