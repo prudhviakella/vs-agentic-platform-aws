@@ -191,7 +191,7 @@ The system prompt is versioned in Amazon Bedrock Prompt Management (prompt ID: `
 /clinical-trial-agent/prod/bedrock/prompt_id      → YEVDY4MYU6
 /clinical-trial-agent/prod/bedrock/prompt_version → 14
 ```
-Updating the prompt without redeploying the agent: run `./scripts/deploy.sh prompt` (creates new Bedrock version, updates SSM), then `./scripts/deploy.sh agent` (agent cold-starts and reads new version from SSM).
+Updating the prompt without redeploying the agent: run `./scripts/infra_deployment/deploy.sh prompt` (creates new Bedrock version, updates SSM), then `./scripts/infra_deployment/deploy.sh agent` (agent cold-starts and reads new version from SSM).
 
 #### 9. Config & Secrets Strategy
 At cold start, the agent reads from two services:
@@ -341,10 +341,18 @@ vs-agentcore-platform-aws/
 │   └── variables.tf
 │
 ├── prompts/
-│   └── system_prompt.txt         # Bedrock system prompt — deploy with: ./scripts/deploy.sh prompt
+│   └── system_prompt.txt         # Bedrock system prompt — deploy with: ./scripts/infra_deployment/deploy.sh prompt
 │
 ├── scripts/
-│   └── deploy.sh                 # One-click deployment script
+│   ├── infra_deployment/
+│   │   ├── deploy.sh             # One-click deployment (Steps 0–6)
+│   │   └── cleanup.sh            # Tear down AWS resources
+│   ├── graph_db/
+│   │   └── clinical_trials_loader.py  # Load 25 trials from ClinicalTrials.gov → Neo4j
+│   └── pinecone/
+│       ├── pinecone_dump.py      # Export all vectors + metadata from Pinecone → JSON
+│       ├── pinecone_load.py      # Import vectors from JSON into a new Pinecone index
+│       └── pinecone_dump.json    # Exported data (not committed — too large for git)
 │
 ├── docs/
 │   └── architecture.png          # Architecture diagram
@@ -355,6 +363,8 @@ vs-agentcore-platform-aws/
 ---
 
 ## Prerequisites
+
+### 1. Local Tools
 
 | Tool | Install | Verify |
 |---|---|---|
@@ -378,6 +388,118 @@ aws sts get-caller-identity
 
 ---
 
+### 2. Pinecone — Vector Store Setup
+
+The agent uses Pinecone for semantic search, semantic cache, and episodic memory.
+
+**Step 1 — Create a free Pinecone account:**
+https://app.pinecone.io → Sign up → Create account
+
+**Step 2 — Create an index:**
+- Index name: `clinical-agent`
+- Dimensions: `1536`  (OpenAI text-embedding-ada-002)
+- Metric: `cosine`
+- Cloud: `AWS`  Region: `us-east-1`
+
+**Step 3 — Get your API key:**
+Pinecone Console → API Keys → Copy key
+
+**Step 4 — Load clinical trial vectors:**
+
+If your instructor provided a `pinecone_dump.json` file:
+```bash
+pip install pinecone tqdm
+export PINECONE_API_KEY=pcsk_...
+
+python3 scripts/pinecone/pinecone_load.py --file pinecone_dump.json
+
+# Dry run first to verify:
+python3 scripts/pinecone/pinecone_load.py --file pinecone_dump.json --dry-run
+```
+
+
+
+**Verify:**
+```bash
+python3 - << 'EOF'
+import os
+from pinecone import Pinecone
+pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+index = pc.Index("clinical-agent")
+stats = index.describe_index_stats()
+print(f"Total vectors: {stats.total_vector_count:,}")
+print(f"Namespaces:    {list(stats.namespaces.keys())}")
+EOF
+```
+Expected: `Total vectors: 5772` (or more)
+
+---
+
+### 3. Neo4j AuraDB — Knowledge Graph Setup
+
+The agent uses Neo4j to answer discovery queries: "what trials exist", "who sponsors trial X", "what drugs are used for disease Y".
+
+**Step 1 — Create a free Neo4j AuraDB:**
+https://neo4j.com/cloud/aura-free/ → Sign up → Create free instance
+
+- Instance name: `clinical-trials`
+- Region: `us-east-1` (or closest to you)
+- Click **Download credentials** — save the `.txt` file, you'll need the password
+
+**Step 2 — Get connection details:**
+AuraDB Console → Your instance → Copy the **Connection URI**
+```
+neo4j+s://xxxxxxxx.databases.neo4j.io
+```
+
+**Step 3 — Load clinical trial data:**
+
+```bash
+pip install neo4j requests
+
+export NEO4J_URI=neo4j+s://xxxxxxxx.databases.neo4j.io
+export NEO4J_USER=neo4j
+export NEO4J_PASSWORD=your-password-from-credentials-file
+
+python3 scripts/graph_db/clinical_trials_loader.py
+```
+
+This fetches 25 trials directly from the free public ClinicalTrials.gov API and loads them into your graph. Takes ~3–5 minutes.
+
+**Verify:**
+```bash
+python3 - << 'EOF'
+import os
+from neo4j import GraphDatabase
+driver = GraphDatabase.driver(
+    os.environ["NEO4J_URI"],
+    auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"])
+)
+with driver.session() as s:
+    count = s.run("MATCH (t:Trial) RETURN count(t) AS c").single()["c"]
+    print(f"Trials loaded: {count}")
+driver.close()
+EOF
+```
+Expected: `Trials loaded: 25`
+
+**What gets loaded:**
+```
+25 Trials
+   └── TARGETS    → Disease       (conditions per trial)
+   └── USES       → Drug          (interventions)
+   └── SPONSORED_BY → Sponsor     (lead sponsor)
+   └── MANAGED_BY → CRO           (collaborators)
+   └── CONDUCTED_IN → Country     (trial sites)
+   └── LOCATED_AT → Site          (facility + lat/lon)
+   └── MEASURES   → Outcome       (primary + secondary endpoints)
+   └── INCLUDES   → PatientPopulation (eligibility criteria)
+   └── ASSOCIATED_WITH → MeSHTerm (NLM controlled vocabulary)
+   └── BELONGS_TO → TrialCategory (top-level grouping)
+```
+
+---
+
 ## Quick Start
 
 ```bash
@@ -391,15 +513,15 @@ cp .env.example .env.prod
 source .env.prod
 
 # Phase 1 — infrastructure (Steps 0–5)
-./scripts/deploy.sh all
+./scripts/infra_deployment/deploy.sh all
 
 # ⚠️ PAUSE: fill POSTGRES_URL in .env.prod with RDS endpoint from terraform output
 # POSTGRES_URL=postgresql://postgres:<pwd>@<rds-endpoint>/clinical_agent
 source .env.prod
-./scripts/deploy.sh secrets
+./scripts/infra_deployment/deploy.sh secrets
 
 # Phase 2 — agent
-./scripts/deploy.sh agent
+./scripts/infra_deployment/deploy.sh agent
 ```
 
 ---
@@ -452,24 +574,24 @@ source .env.prod
 ### Phase 1 — Infrastructure + Platform
 
 > Each step is idempotent — safe to re-run.
-> `./scripts/deploy.sh all` runs Steps 0–5 then pauses for the manual POSTGRES_URL step.
+> `./scripts/infra_deployment/deploy.sh all` runs Steps 0–5 then pauses for the manual POSTGRES_URL step.
 
 **Step 0 — Bedrock Prompt**
 ```bash
-./scripts/deploy.sh prompt
+./scripts/infra_deployment/deploy.sh prompt
 ```
 Creates the system prompt in Amazon Bedrock Prompt Management. Writes `prompt_id` and `prompt_version` to SSM Parameter Store. Re-run whenever you update `prompts/system_prompt.txt`.
 
 **Step 1 — Secrets**
 ```bash
-./scripts/deploy.sh secrets
+./scripts/infra_deployment/deploy.sh secrets
 ```
 Writes all API keys from `.env.prod` to AWS Secrets Manager and SSM Parameter Store.
 > Note: Postgres secret is skipped if `POSTGRES_URL` is empty — re-run after Step 5.
 
 **Step 2 — IAM Roles**
 ```bash
-./scripts/deploy.sh iam
+./scripts/infra_deployment/deploy.sh iam
 ```
 Creates:
 - `vs-agentcore-lambda-mcp` — Lambda execution role (Secrets Manager + SSM)
@@ -478,7 +600,7 @@ Creates:
 
 **Step 3 — Lambda Tools**
 ```bash
-./scripts/deploy.sh lambdas
+./scripts/infra_deployment/deploy.sh lambdas
 ```
 Builds 4 Lambda container images (linux/amd64) and deploys:
 - `vs-agentcore-search-tool` → Pinecone semantic search
@@ -490,7 +612,7 @@ Each Lambda is test-invoked after deployment. Takes ~5 minutes.
 
 **Step 4 — MCP Gateway**
 ```bash
-./scripts/deploy.sh gateway
+./scripts/infra_deployment/deploy.sh gateway
 ```
 Creates the Bedrock AgentCore MCP Gateway `vs-agentcore-mcp` and registers 4 tool targets. Skipped automatically if the gateway already exists.
 
@@ -502,7 +624,7 @@ Tool target names (what the LLM sees):
 
 **Step 5 — Platform + UI (Terraform)**
 ```bash
-./scripts/deploy.sh platform
+./scripts/infra_deployment/deploy.sh platform
 ```
 Runs `terraform apply` — creates:
 - VPC (public + private subnets, 2 AZs)
@@ -529,7 +651,7 @@ POSTGRES_URL=postgresql://postgres:YourStrongPassword123!@vs-agentcore-postgres.
 
 # Push the postgres secret
 source .env.prod
-./scripts/deploy.sh secrets
+./scripts/infra_deployment/deploy.sh secrets
 ```
 
 ---
@@ -538,7 +660,7 @@ source .env.prod
 
 **Step 6 — AgentCore Runtime**
 ```bash
-./scripts/deploy.sh agent
+./scripts/infra_deployment/deploy.sh agent
 ```
 Builds the agent container (linux/arm64 — AgentCore requires arm64), pushes to ECR, and creates/updates the AgentCore Runtime. Waits for READY status (~2 minutes).
 
@@ -617,16 +739,320 @@ aws bedrock-agentcore invoke-agent-runtime \
 
 ---
 
+## Local Development & Testing
+
+Everything can be run and tested locally before deploying to AWS. This is the fastest way to iterate on agent logic, prompts, Lambda tools, and the UI.
+
+---
+
+### Prerequisites for Local Dev
+
+```bash
+pip install -r agent/requirements.txt
+pip install -r platform/requirements.txt
+pip install -r ui/requirements.txt
+```
+
+Create a local `.env.local` file (copy from `.env.prod` but use local values):
+```bash
+cp .env.prod .env.local
+source .env.local
+```
+
+---
+
+### 1. Run the Agent Locally (no AgentCore, no Docker)
+
+The LangGraph agent runs directly as a Python process — no AWS AgentCore needed:
+
+```bash
+cd agent
+source ../.env.local
+
+# Run a single query directly
+python3 - << 'EOF'
+import asyncio
+from app import create_agent
+
+async def main():
+    agent = await create_agent()
+    session_id = "local-test-001"
+    async for event in agent.astream({
+        "message": "What are the Phase 3 results for Pfizer BNT162b2?",
+        "thread_id": session_id,
+        "domain": "pharma",
+        "resume": False
+    }):
+        print(event)
+
+asyncio.run(main())
+EOF
+```
+
+---
+
+### 2. Run the Platform API Locally
+
+```bash
+cd platform
+source ../.env.local
+
+# Point to local agent instead of AgentCore Runtime
+export AGENT_MODE=local   # if supported by your platform/app.py
+
+uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+```
+
+Test it:
+```bash
+SESSION_ID=$(python3 -c "import uuid; print(str(uuid.uuid4()))")
+
+curl -X POST http://localhost:8000/api/v1/clinical-trial/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: ${PLATFORM_API_KEY}" \
+  -d "{\"message\": \"What trials exist for semaglutide?\", \"thread_id\": \"${SESSION_ID}\", \"domain\": \"pharma\"}"
+```
+
+---
+
+### 3. Run the UI Locally
+
+```bash
+cd ui
+source ../.env.local
+
+export AGENT_API_URL=http://localhost:8000
+export AGENT_DOMAIN=pharma
+export AGENT_API_KEY=${PLATFORM_API_KEY}
+
+uvicorn app:app --host 0.0.0.0 --port 8501 --reload
+```
+
+Open: http://localhost:8501
+
+---
+
+### 4. Test Lambda Tools Locally
+
+Each Lambda tool is a standalone Python function — invoke the handler directly:
+
+```bash
+# Test search_tool
+cd mcp_tools/search_lambda
+source ../../.env.local
+
+python3 - << 'EOF'
+from handler import handler
+result = handler({"query": "semaglutide Phase 3 results", "top_k": 3}, {})
+import json; print(json.dumps(result, indent=2))
+EOF
+```
+
+```bash
+# Test graph_tool
+cd mcp_tools/graph_lambda
+source ../../.env.local
+
+python3 - << 'EOF'
+from handler import handler
+result = handler({"cypher": "MATCH (t:Trial) RETURN t.nctId, t.briefTitle LIMIT 5"}, {})
+import json; print(json.dumps(result, indent=2))
+EOF
+```
+
+```bash
+# Test summariser_tool
+cd mcp_tools/summariser_lambda
+source ../../.env.local
+
+python3 - << 'EOF'
+from handler import handler
+result = handler({
+    "chunks": [
+        "The BNT162b2 vaccine showed 95% efficacy in preventing COVID-19.",
+        "The trial enrolled 43,548 participants across multiple sites."
+    ],
+    "query": "What were the efficacy results?"
+}, {})
+import json; print(json.dumps(result, indent=2))
+EOF
+```
+
+---
+
+### 5. Run with Docker Compose (full local stack)
+
+Run the entire platform locally with Docker Compose — no AWS needed except for Pinecone, Neo4j, and OpenAI:
+
+```bash
+# Build all images locally
+docker compose build
+
+# Start platform API + UI
+docker compose up
+
+# UI:      http://localhost:8501
+# API:     http://localhost:8000
+# Health:  http://localhost:8000/health
+```
+
+`docker-compose.yml` example:
+```yaml
+version: "3.9"
+services:
+  platform:
+    build: ./platform
+    ports: ["8000:8000"]
+    env_file: .env.local
+    environment:
+      - AGENT_MODE=local
+
+  ui:
+    build: ./ui
+    ports: ["8501:8501"]
+    env_file: .env.local
+    environment:
+      - AGENT_API_URL=http://platform:8000
+      - AGENT_DOMAIN=pharma
+    depends_on: [platform]
+```
+
+---
+
+### 6. Test Individual Middleware Layers
+
+Test each middleware layer in isolation:
+
+```bash
+cd agent
+source ../.env.local
+
+# Test SemanticCacheMiddleware
+python3 - << 'EOF'
+import asyncio
+from core.middleware.semantic_cache import SemanticCacheMiddleware
+
+async def test():
+    mw = SemanticCacheMiddleware()
+    result = await mw.check_cache(
+        query="What are the Phase 3 results for BNT162b2?",
+        domain="pharma"
+    )
+    print(f"Cache hit: {result is not None}")
+    print(result)
+
+asyncio.run(test())
+EOF
+```
+
+```bash
+# Test TracerMiddleware — verify DynamoDB write
+python3 - << 'EOF'
+import asyncio, uuid
+from core.middleware.tracer import TracerMiddleware
+
+async def test():
+    run_id = str(uuid.uuid4())
+    tm = TracerMiddleware()
+    await tm.init_trace(run_id, {
+        "question": "test query",
+        "domain": "pharma",
+        "session_id": run_id
+    })
+    await tm.finalize_trace(run_id, {
+        "answer": "test answer",
+        "total_tokens": 100,
+        "token_cost_usd": 0.001,
+        "elapsed_ms": 1500
+    })
+    print(f"Trace written: {run_id}")
+    # Check DynamoDB
+    import boto3
+    table = boto3.resource("dynamodb", region_name="us-east-1").Table("vs-agentcore-traces")
+    item = table.get_item(Key={"run_id": run_id}).get("Item")
+    print(f"DynamoDB record: {item is not None}")
+
+asyncio.run(test())
+EOF
+```
+
+---
+
+### 7. Test Neo4j Connection
+
+```bash
+python3 - << 'EOF'
+import os
+from neo4j import GraphDatabase
+
+driver = GraphDatabase.driver(
+    os.environ["NEO4J_URI"],
+    auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"])
+)
+with driver.session() as session:
+    result = session.run("MATCH (t:Trial) RETURN t.nctId, t.briefTitle LIMIT 5")
+    for r in result:
+        print(r["t.nctId"], "-", r["t.briefTitle"])
+driver.close()
+EOF
+```
+
+---
+
+### 8. Test Pinecone Connection
+
+```bash
+python3 - << 'EOF'
+import os
+from pinecone import Pinecone
+
+pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+index = pc.Index(os.environ["CLINICAL_TRIALS_INDEX"])
+
+stats = index.describe_index_stats()
+print(f"Total vectors: {stats.total_vector_count}")
+print(f"Namespaces: {list(stats.namespaces.keys())}")
+
+# Test a query
+results = index.query(
+    vector=[0.0] * 1536,   # dummy vector — replace with real embedding
+    top_k=3,
+    include_metadata=True
+)
+print(f"Query returned {len(results.matches)} results")
+EOF
+```
+
+---
+
+### Local Testing Checklist
+
+Before deploying to AWS, verify locally:
+
+| Test | Command | Expected |
+|---|---|---|
+| Neo4j connection | `python3` + graph query above | 5 trial rows returned |
+| Pinecone connection | `python3` + stats above | total_vector_count > 0 |
+| search_tool | handler test above | results[] with score and text |
+| graph_tool | handler test above | results[] with nctId and briefTitle |
+| summariser_tool | handler test above | summary string returned |
+| Platform API health | `curl localhost:8000/health` | `{"status": "ok"}` |
+| UI loads | open localhost:8501 | Dark clinical UI appears |
+| Full query | curl /chat endpoint | SSE events stream |
+| HITL flow | vague query + resume | interrupt event + final answer |
+
+---
+
 ## Daily Development Workflow
 
 | What changed | Command |
 |---|---|
-| Agent code (`agent/`) | `./scripts/deploy.sh agent` |
-| System prompt (`prompts/system_prompt.txt`) | `./scripts/deploy.sh prompt` then `./scripts/deploy.sh agent` |
-| UI code (`ui/`) | Build + push, then `./scripts/deploy.sh redeploy ui` |
-| Platform API (`platform/`) | Build + push, then `./scripts/deploy.sh redeploy platform` |
-| Lambda tools (`mcp_tools/`) | `./scripts/deploy.sh lambdas` |
-| Secrets / API keys | `./scripts/deploy.sh secrets` |
+| Agent code (`agent/`) | `./scripts/infra_deployment/deploy.sh agent` |
+| System prompt (`prompts/system_prompt.txt`) | `./scripts/infra_deployment/deploy.sh prompt` then `./scripts/infra_deployment/deploy.sh agent` |
+| UI code (`ui/`) | Build + push, then `./scripts/infra_deployment/deploy.sh redeploy ui` |
+| Platform API (`platform/`) | Build + push, then `./scripts/infra_deployment/deploy.sh redeploy platform` |
+| Lambda tools (`mcp_tools/`) | `./scripts/infra_deployment/deploy.sh lambdas` |
+| Secrets / API keys | `./scripts/infra_deployment/deploy.sh secrets` |
 
 **Quick UI rebuild and redeploy:**
 ```bash
@@ -639,22 +1065,22 @@ aws ecr get-login-password --region us-east-1 | \
 docker buildx build --platform linux/amd64 --output type=registry \
   --provenance=false --no-cache -t "$ECR_TAG" ./ui
 
-./scripts/deploy.sh redeploy ui
+./scripts/infra_deployment/deploy.sh redeploy ui
 ```
 
 **Available deploy commands:**
 ```bash
-./scripts/deploy.sh prompt     # Step 0: create/version Bedrock prompt → SSM
-./scripts/deploy.sh secrets    # Step 1: push secrets + SSM params
-./scripts/deploy.sh iam        # Step 2: create IAM roles
-./scripts/deploy.sh lambdas    # Step 3: build + deploy Lambda tools
-./scripts/deploy.sh gateway    # Step 4: create MCP Gateway + targets
-./scripts/deploy.sh platform   # Step 5: Terraform (ECS, ALB, RDS)
-./scripts/deploy.sh agent      # Step 6: build + deploy AgentCore Runtime
-./scripts/deploy.sh all        # Steps 0–5 then pauses for POSTGRES_URL
-./scripts/deploy.sh redeploy [platform|ui|both]  # Quick ECS force-redeploy
-./scripts/deploy.sh plan       # Terraform plan (no changes)
-./scripts/deploy.sh destroy    # Tear down all Terraform resources
+./scripts/infra_deployment/deploy.sh prompt     # Step 0: create/version Bedrock prompt → SSM
+./scripts/infra_deployment/deploy.sh secrets    # Step 1: push secrets + SSM params
+./scripts/infra_deployment/deploy.sh iam        # Step 2: create IAM roles
+./scripts/infra_deployment/deploy.sh lambdas    # Step 3: build + deploy Lambda tools
+./scripts/infra_deployment/deploy.sh gateway    # Step 4: create MCP Gateway + targets
+./scripts/infra_deployment/deploy.sh platform   # Step 5: Terraform (ECS, ALB, RDS)
+./scripts/infra_deployment/deploy.sh agent      # Step 6: build + deploy AgentCore Runtime
+./scripts/infra_deployment/deploy.sh all        # Steps 0–5 then pauses for POSTGRES_URL
+./scripts/infra_deployment/deploy.sh redeploy [platform|ui|both]  # Quick ECS force-redeploy
+./scripts/infra_deployment/deploy.sh plan       # Terraform plan (no changes)
+./scripts/infra_deployment/deploy.sh destroy    # Tear down all Terraform resources
 ```
 
 ---
@@ -783,7 +1209,7 @@ aws logs tail /ecs/vs-agentcore/ui --since 5m
 ## Tear Down
 
 ```bash
-./scripts/deploy.sh destroy
+./scripts/infra_deployment/deploy.sh destroy
 ```
 
 Destroys all Terraform-managed resources: ECS cluster, ALB, RDS, DynamoDB table, VPC, subnets, security groups, CloudWatch log groups, S3 state bucket.
