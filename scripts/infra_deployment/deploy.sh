@@ -4,17 +4,17 @@
 # One-click deployment for students.
 # Run individual steps or everything at once:
 #
-#   ./scripts/deploy.sh prompt     # Step 0: create/version Bedrock prompt → SSM
-#   ./scripts/deploy.sh secrets    # Step 1: push secrets + SSM params
-#   ./scripts/deploy.sh iam        # Step 2: create IAM roles
-#   ./scripts/deploy.sh lambdas    # Step 3: build + deploy Lambda tools
-#   ./scripts/deploy.sh gateway    # Step 4: create MCP Gateway + targets
-#   ./scripts/deploy.sh platform   # Step 5: Terraform (ECS, ALB, RDS) — creates RDS first
-#   ./scripts/deploy.sh agent      # Step 6: build + deploy AgentCore Runtime
-#   ./scripts/deploy.sh all        # All steps in order (STUDENTS USE THIS)
-#   ./scripts/deploy.sh redeploy   # Quick ECS redeploy after code changes
-#   ./scripts/deploy.sh plan       # Terraform plan only (no AWS changes)
-#   ./scripts/deploy.sh destroy    # Destroy Terraform resources
+#   ./scripts/infra_deployment/deploy.sh prompt     # Step 0: create/version Bedrock prompt → SSM
+#   ./scripts/infra_deployment/deploy.sh secrets    # Step 1: push secrets + SSM params
+#   ./scripts/infra_deployment/deploy.sh iam        # Step 2: create IAM roles
+#   ./scripts/infra_deployment/deploy.sh lambdas    # Step 3: build + deploy Lambda tools
+#   ./scripts/infra_deployment/deploy.sh gateway    # Step 4: create MCP Gateway + targets
+#   ./scripts/infra_deployment/deploy.sh platform   # Step 5: Terraform (ECS, ALB, RDS) — creates RDS first
+#   ./scripts/infra_deployment/deploy.sh agent      # Step 6: build + deploy AgentCore Runtime
+#   ./scripts/infra_deployment/deploy.sh all        # All steps in order (STUDENTS USE THIS)
+#   ./scripts/infra_deployment/deploy.sh redeploy   # Quick ECS redeploy after code changes
+#   ./scripts/infra_deployment/deploy.sh plan       # Terraform plan only (no AWS changes)
+#   ./scripts/infra_deployment/deploy.sh destroy    # Destroy Terraform resources
 #
 # DEPLOYMENT ORDER MATTERS:
 #   platform runs BEFORE agent because:
@@ -510,7 +510,7 @@ step_lambdas() {
       -t "${TAG}" \
       "${ROOT}/mcp_tools/${tool}_lambda"
 
-    ENV_VARS="Variables={SSM_PREFIX=${SSM_PREFIX},AWS_REGION=${REGION}}"
+    ENV_VARS="Variables={SSM_PREFIX=${SSM_PREFIX}}"
 
     if aws lambda get-function --function-name "${FUNC}" --region "${REGION}" &>/dev/null; then
       echo "  Updating ${FUNC}..."
@@ -566,6 +566,7 @@ step_gateway() {
 
   GATEWAY_ROLE="arn:aws:iam::${ACCOUNT_ID}:role/${PREFIX}-gateway-role"
 
+  # ── Find or create gateway ─────────────────────────────────────────────
   EXISTING_GW=$(aws bedrock-agentcore-control list-gateways \
     --region "${REGION}" \
     --query "items[?name=='${GATEWAY_NAME}'].gatewayId | [0]" \
@@ -602,42 +603,56 @@ step_gateway() {
       echo -n "."
       sleep 5
     done
-
-    register_target() {
-      local tgt_name="$1" tool_name="$2" tool_desc="$3" lambda_func="$4" schema="$5"
-      echo "  Registering ${tgt_name} → ${lambda_func}..."
-      aws bedrock-agentcore-control create-gateway-target \
-        --region "${REGION}" \
-        --gateway-identifier "${GATEWAY_ID}" \
-        --name "${tgt_name}" \
-        --description "${tool_desc}" \
-        --target-configuration "{\"mcp\":{\"lambda\":{\"lambdaArn\":\"arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:${lambda_func}\",\"toolSchema\":{\"inlinePayload\":[{\"name\":\"${tool_name}\",\"description\":\"${tool_desc}\",\"inputSchema\":${schema}}]}}}}" \
-        --credential-provider-configurations "[{\"credentialProviderType\":\"GATEWAY_IAM_ROLE\"}]" > /dev/null
-      echo "  ✅ ${tgt_name}"
-    }
-
-    register_target "tool-search" "search_tool" \
-      "Semantic search over 5,772 clinical trial document chunks in Pinecone. Best for: efficacy, safety, dosage, endpoints, adverse events, trial results, document-level evidence." \
-      "${PREFIX}-search-tool" \
-      '{"type":"object","properties":{"query":{"type":"string","description":"Natural language search query"},"top_k":{"type":"integer","description":"Number of results (default 5)"}},"required":["query"]}'
-
-    register_target "tool-graph" "graph_tool" \
-      "Cypher query on Neo4j biomedical knowledge graph. Best for: what trials exist, trial names and NCT IDs, sponsors, drug-disease relationships, patient eligibility. Schema: (Trial)-[:USES]->(Drug),[:TARGETS]->(Disease),[:SPONSORED_BY]->(Sponsor). Read-only." \
-      "${PREFIX}-graph-tool" \
-      '{"type":"object","properties":{"cypher":{"type":"string","description":"Read-only Cypher query. No CREATE, MERGE, SET, DELETE, DROP."}},"required":["cypher"]}'
-
-    # Target name "clarify" → LLM sees "clarify___ask_user_input" — natural English
-    register_target "clarify" "ask_user_input" \
-      "Ask user to clarify an ambiguous query. Options MUST be exact trial names or NCT IDs from search/graph results — never generic categories." \
-      "${PREFIX}-hitl-tool" \
-      '{"type":"object","properties":{"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"allow_freetext":{"type":"boolean"},"user_answer":{"type":"string"}},"required":[]}'
-
-    register_target "tool-summariser" "summariser_tool" \
-      "FINAL step only. Synthesise chunks from search_tool/graph_tool into one answer with citations. Never call first." \
-      "${PREFIX}-summariser-tool" \
-      '{"type":"object","properties":{"chunks":{"type":"array","items":{"type":"string"}},"query":{"type":"string"}},"required":["chunks"]}'
   fi
 
+  # ── Register targets — skip if already exist ──────────────────────────
+  register_target() {
+    local tgt_name="$1" tool_name="$2" tool_desc="$3" lambda_func="$4" schema="$5"
+
+    # Check if target already exists
+    EXISTING_TGT=$(aws bedrock-agentcore-control list-gateway-targets \
+      --gateway-identifier "${GATEWAY_ID}" \
+      --region "${REGION}" \
+      --query "items[?name=='${tgt_name}'].name | [0]" \
+      --output text 2>/dev/null || echo "")
+
+    if [ -n "${EXISTING_TGT}" ] && [ "${EXISTING_TGT}" != "None" ]; then
+      echo "  ⏭  ${tgt_name} already exists — skipping"
+      return
+    fi
+
+    echo "  Registering ${tgt_name} → ${lambda_func}..."
+    aws bedrock-agentcore-control create-gateway-target \
+      --region "${REGION}" \
+      --gateway-identifier "${GATEWAY_ID}" \
+      --name "${tgt_name}" \
+      --description "${tool_desc}" \
+      --target-configuration "{\"mcp\":{\"lambda\":{\"lambdaArn\":\"arn:aws:lambda:${REGION}:${ACCOUNT_ID}:function:${lambda_func}\",\"toolSchema\":{\"inlinePayload\":[{\"name\":\"${tool_name}\",\"description\":\"${tool_desc}\",\"inputSchema\":${schema}}]}}}}" \
+      --credential-provider-configurations "[{\"credentialProviderType\":\"GATEWAY_IAM_ROLE\"}]" > /dev/null
+    echo "  ✅ ${tgt_name}"
+  }
+
+  register_target "tool-search" "search_tool" \
+    "Semantic search over 5,772 clinical trial chunks in Pinecone. Best for: efficacy, dosage, endpoints, adverse events, trial results." \
+    "${PREFIX}-search-tool" \
+    '{"type":"object","properties":{"query":{"type":"string","description":"Natural language search query"},"top_k":{"type":"integer","description":"Number of results (default 5)"}},"required":["query"]}'
+
+  register_target "tool-graph" "graph_tool" \
+    "Neo4j Cypher graph query. Best for: trial names, NCT IDs, sponsors, drug-disease links, eligibility. Read-only. Schema: Trial-[:USES]->Drug, Trial-[:TARGETS]->Disease." \
+    "${PREFIX}-graph-tool" \
+    '{"type":"object","properties":{"cypher":{"type":"string","description":"Read-only Cypher query. No CREATE, MERGE, SET, DELETE, DROP."}},"required":["cypher"]}'
+
+  register_target "clarify" "ask_user_input" \
+    "Ask user to clarify an ambiguous query. Options must be exact trial names or NCT IDs from search/graph results." \
+    "${PREFIX}-hitl-tool" \
+    '{"type":"object","properties":{"question":{"type":"string"},"options":{"type":"array","items":{"type":"string"}},"allow_freetext":{"type":"boolean"},"user_answer":{"type":"string"}},"required":[]}'
+
+  register_target "tool-summariser" "summariser_tool" \
+    "Synthesise retrieved chunks into a cited answer. Always call last after search or graph tools." \
+    "${PREFIX}-summariser-tool" \
+    '{"type":"object","properties":{"chunks":{"type":"array","items":{"type":"string"}},"query":{"type":"string"}},"required":["chunks"]}'
+
+  # ── Save gateway URL to SSM ───────────────────────────────────────────
   aws ssm put-parameter \
     --name "${SSM_PREFIX}/mcp/gateway_url" \
     --value "${GATEWAY_URL}" \
