@@ -322,7 +322,7 @@ put_param("/clinical-agent/prod/pinecone/api_key",
           os.environ["PINECONE_API_KEY"], secure=True)
 put_param("/clinical-agent/prod/pinecone/index_name",
           os.environ.get("PINECONE_INDEX_NAME", "clinical-agent"))
-
+put_param(f"{ssm_prefix}/platform_api_key", os.environ["PLATFORM_API_KEY"], secure=True)
 # ── SSM non-secret config ──────────────────────────────────────────────────
 put_param(f"{ssm_prefix}/pinecone/clinical_trials_index",
           os.environ.get("CLINICAL_TRIALS_INDEX", "clinical-trials-index"))
