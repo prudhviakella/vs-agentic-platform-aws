@@ -547,7 +547,25 @@ source .env.prod
 # Phase 2 — agent
 ./scripts/infra_deployment/deploy.sh agent
 ```
+```
+Once the agent deployed into agent core test it locally by executing below commands from the terminal
+source .env.prod
 
+# Pull
+docker pull <aws-account-id>.dkr.ecr.us-east-1.amazonaws.com/vs-agentcore/agent:latest
+
+# Run
+docker run -p 8080:8080 \
+  -e SSM_PREFIX=/vs-agentcore/prod \
+  -e AWS_REGION=us-east-1 \
+  -e AGENT_ENV=prod \
+  -v ~/.aws:/root/.aws:ro \
+  107282186797.dkr.ecr.us-east-1.amazonaws.com/vs-agentcore/agent:latest
+ 
+ curl -s -X POST http://localhost:8080/invocations \
+  -H "Content-Type: application/json" \
+  -d '{"message":"What are Phase 3 results for mRNA-1273?","thread_id":"docker-001","domain":"pharma"}'
+```
 ---
 
 ## Deployment — Step by Step
